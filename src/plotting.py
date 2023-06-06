@@ -20,8 +20,17 @@ class Baseball_Field:
         
         # these are needed so you can clear some of the figure, but not all
         self.fielders_artist = None
+        self.batters_artist = None
         self.ball_artist = None
         self.event_annotation_artist = None
+        self.last_plot_event = None
+        self.last_player_pos = None
+        
+        
+        self.this_ts_fielders = None
+        self.this_ts_batters = None
+        self.this_ts_ball = None
+        
         
 
     def plot_2d_field(self):
@@ -131,6 +140,36 @@ class Baseball_Field:
         return fig, ax
     
     
+    def plot_all_components(self, this_ts_fielders, this_ts_batters, this_ts_ball, this_ts_event):
+        
+        
+        if self.this_ts_fielders is None or self.this_ts_fielders.shape[0] != 0:
+            self.this_ts_fielders = this_ts_fielders.copy()
+
+        
+        # 
+        
+        if this_ts_event.shape[0] != 0:
+            self.last_plot_event = this_ts_event["event"].values[0]
+            self.last_player_pos = this_ts_event['player_position'].values[0]
+        
+        
+        if self.last_plot_event == "ball acquired":
+            # this means the ball is in the fielders hand I think
+            
+            print("ball should be in glove here of player " + str(self.last_player_pos))
+            
+            this_ts_ball.loc[:, "ball_position_x"] = self.this_ts_fielders.loc[self.this_ts_fielders["player_position"] == self.last_player_pos, "field_x"].values
+            this_ts_ball.loc[:, "ball_position_y"] = self.this_ts_fielders.loc[self.this_ts_fielders["player_position"] == self.last_player_pos, "field_y"].values
+            this_ts_ball["ball_position_z"] = 0
+            
+        
+        self.add_batters_to_plot(this_ts_batters)
+        self.add_ball_to_plot(this_ts_ball)
+        self.add_fielders_to_plot(this_ts_fielders)
+
+
+    
     def add_fielders_to_plot(self, this_ts_fielders, show_trails = False):
         
         # if there is nothing in this timestamp, just quit and leave it
@@ -146,7 +185,21 @@ class Baseball_Field:
         
         self.fielders_artist = self.ax.scatter(this_ts_fielders["field_x"], this_ts_fielders["field_y"], color='yellow', marker='o', s=80)
         
+    def add_batters_to_plot(self, this_ts_batters, show_trails = False):
         
+        # if there is nothing in this timestamp, just quit and leave it
+        if this_ts_batters.shape[0] == 0:
+            
+            return
+        #elif this_ts_batters.shape[0] < 9:
+        #    print("missing batters data at timestamp")
+        #    print(str(this_ts_batters.loc[:, ["timestamp", "player_position"]]))
+        
+        if self.batters_artist is not None and show_trails == False:
+            self.batters_artist.remove()
+        
+        self.batters_artist = self.ax.scatter(this_ts_batters["field_x"], this_ts_batters["field_y"], color='black', marker='o', s=80)
+            
         
     def add_ball_to_plot(self, this_ts_ball_pos, show_trails = False):
         
