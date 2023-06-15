@@ -12,7 +12,7 @@ import pandas as pd
 class Baseball_Field:
     # originally inspired by this!
     # https://www.kaggle.com/code/debojit23/baseball-field-structure-matplotlib
-    def __init__(self, figsize):
+    def __init__(self, figsize=(12,12)):
         
         plt.ioff()
         self.figsize = figsize
