@@ -45,18 +45,28 @@ class Game:
         self.season = game_string_tokens[0]
         self.game_num = game_string_tokens[1]
         
-        # read in all my data
-        self.game_info_df = pd.read_csv(file_path + "game_info/game_info-" + which_game + ".csv", index_col=0)
-        self.game_events_df = pd.read_csv(file_path + "game_events/game_events-" + which_game + ".csv", index_col=0)
-        self.game_events_df["event"] = self.game_events_df["event_code"].map(lambda x: EVENT_CODE_TO_DESC[x])
+        #### read in all my data ###
         
-        self.ball_pos_df = pd.read_csv(file_path + "ball_pos/ball_pos-" + which_game + ".csv", index_col=0)
+        # read in game info
+        self.game_info_df = pd.read_csv(file_path + "game_info/game_info-" + which_game + ".csv", index_col=0)
+        
+        # a function for computing at_bats, outs, etc 
+        self.game_info_df = self._prep_info_df(self.game_info_df)
+
+        
+        self.game_events_df = pd.read_csv(file_path + "game_events/game_events-" + which_game + ".csv", index_col=0)
+        self.game_events_df = self._prep_events_df(self.game_events_df)
+        
+        self.ball_pos_df = pd.read_csv(file_path + "ball_pos/ball_pos-" + which_game + ".csv", index_col=0)        
         
         player_pos_path = file_path + "player_pos/" + self.home_team + "/player_pos-"
         player_pos_path += self.season + "_" + self.home_team + "/player_pos-" + which_game + ".csv"
         self.player_pos_df = pd.read_csv(player_pos_path, index_col=0)
         
-        # compute velocities so I have 
+        # fill the gaps in the ball_pos data
+        self.ball_pos_df = self._fill_ball_pos_when_acquired(self.game_events_df, self.player_pos_df, self.ball_pos_df)
+
+        # compute velocities so I have that for further analysis and plotting
         # these should get smoothed and the names and times should maybe change the name from new lol
         self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "ball_position_x", "ball_position_y", "ball_position_z"])
         self.new_player_pos = self._compute_velos(self.player_pos_df, ["play_id", "player_position"], ["timestamp", "field_x", "field_y"])
@@ -78,7 +88,99 @@ class Game:
         
         return game_string
     
+    def _fill_ball_pos_when_acquired(self, game_events, player_pos, ball_pos):
+        """
+        This is making an assumption that (1) the ball data is missing when a ball is acquired and (2) that the fielder's position
+        is the best proxy for where the ball is when it is missing (we can't see limbs!)
+
+        """
+        game_events = game_events.copy()
+        player_pos = player_pos.copy()
+        ball_pos = ball_pos.copy()
+
+        # get the windows in the game where a ball is in someone's glove or hand
+        ball_acquired_windows = game_events.loc[(game_events["event_code"] == 2) & (game_events["next_event_code"] != 5), :]
+
+        for player, this_ts, next_ts in zip(ball_acquired_windows["player_position"], ball_acquired_windows["timestamp"],\
+                                            ball_acquired_windows["next_event_ts"]):
+
+            play_pos_during_window = player_pos.loc[(player_pos["player_position"] == player) & 
+                                                  (player_pos["timestamp"] > this_ts) & 
+                                                  (player_pos["timestamp"] < next_ts),
+                                                       :]
+
+            # I might mess with this assumption later -- you could jump and be scooping or whatever here
+            play_pos_during_window["ball_position_z"] = 5
+
+            play_pos_during_window = play_pos_during_window.loc[:, ["game_str", 
+                                                                    "play_id", 
+                                                                    "timestamp", 
+                                                                    "field_x", 
+                                                                    "field_y", 
+                                                                    "ball_position_z"]]
+            
+            play_pos_during_window.columns = ["game_str", 
+                                              "play_id", 
+                                              "timestamp", 
+                                              "ball_position_x", 
+                                              "ball_position_y", 
+                                              "ball_position_z"]
+
+            ball_pos = pd.concat([ball_pos, play_pos_during_window])
+
+
+        ball_pos.sort_values(["play_id", "timestamp"], inplace=True)
+
+        return ball_pos
+    
+    
+    def _prep_info_df(self, df):
+        """
+        A utility for adding relevant fields to game info table, like at_bat and outs, etc.
+        
+        """
+        
+        game_info = df.copy()
+        
+        # TODO: more stuff goes here!
+        pass
+        
+        return game_info
+
+    
+    def _prep_events_df(self, df):
+        """
+        A utility for adding useful columns to the game_events table
+        """
+        
+        game_events = df.copy()
+        game_events = game_events.sort_values(["timestamp", "event_code"], ascending=[True, True])
+
+        
+        game_events["event"] = game_events["event_code"].map(lambda x: EVENT_CODE_TO_DESC[x])
+        
+        game_events["next_event_code"] =  game_events.groupby("play_per_game")["event_code"].shift(-1)
+        game_events["next_event"] =  game_events.groupby("play_per_game")["event"].shift(-1)
+        game_events["next_event_ts"] =  game_events.groupby("play_per_game")["timestamp"].shift(-1)
+    
+        return game_events
+    
+    
+    def _smooth_columns(self, df, cols):
+        pass
+    
+        # the easiest would be like a moving average 
+        # with more effort, could do a Kalman filter?
+    
+    
     def _compute_velos(self, df, group_by_cols, cols):
+        """
+        A utility to compute velocities at the row level
+        
+        I suggest smoothing and resampling the data before this gets called
+        
+        """
+        
         
         lagged_df = df.groupby(group_by_cols)[cols].shift(1)
         lagged_df.columns = ["lag_1_" + s for s in cols]
@@ -93,14 +195,8 @@ class Game:
         velo_df.columns = [s.replace("position", "velo").replace("field", "velo") for s in cols]
         
         return pd.concat([df, lagged_df, diff_df, velo_df], axis=1)
-        
     
-    def _smooth_columns(self, df, cols):
-        pass
     
-        # the easiest would be like a moving average 
-        # with more effort, could do a Kalman filter?
-        
         
     def collect_all_timestamps(self, ball_df, player_df, game_events_df, cols = ["play_id", "timestamp"]):
         """
