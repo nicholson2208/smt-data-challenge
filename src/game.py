@@ -66,9 +66,22 @@ class Game:
         # fill the gaps in the ball_pos data
         self.ball_pos_df = self._fill_ball_pos_when_acquired(self.game_events_df, self.player_pos_df, self.ball_pos_df)
 
+        # smoothing should go here
+        self.ball_pos_df = self._smooth_ball_position(self.ball_pos_df)
+        
         # compute velocities so I have that for further analysis and plotting
         # these should get smoothed and the names and times should maybe change the name from new lol
-        self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "ball_position_x", "ball_position_y", "ball_position_z"])
+        self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", 
+                                                                                "ball_position_x", 
+                                                                                "ball_position_y", 
+                                                                                "ball_position_z",
+                                                                                "smoothed_ball_position_x", 
+                                                                                "smoothed_ball_position_y", 
+                                                                                "smoothed_ball_position_z"
+                                                                               ]
+                                               )
+        
+#         self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "smoothed_ball_position_x", "smoothed_ball_position_y", "smoothed_ball_position_z"])
         self.new_player_pos = self._compute_velos(self.player_pos_df, ["play_id", "player_position"], ["timestamp", "field_x", "field_y"])
         
         self.timestamp_df = self.collect_all_timestamps(self.new_ball_pos, self.new_player_pos, self.game_events_df)
@@ -166,11 +179,30 @@ class Game:
         return game_events
     
     
-    def _smooth_columns(self, df, cols):
-        pass
-    
+    def _smooth_ball_position(self, df):
+        """
+        
+        See exploration in SmoothingAnalysis notebook
+        
+        """
+        
         # the easiest would be like a moving average 
         # with more effort, could do a Kalman filter?
+        
+        # I am not actually sure I need this
+        
+        
+        smoothed_pos_df = df.copy()
+
+        smoothed_xy = df.groupby("play_id")[["timestamp", "ball_position_x", "ball_position_y", "ball_position_z"]]\
+            .rolling(3, center=True, closed="both").mean()
+                
+ 
+        smoothed_pos_df["smoothed_ball_position_x"] = smoothed_xy["ball_position_x"].values
+        smoothed_pos_df["smoothed_ball_position_y"] = smoothed_xy["ball_position_y"].values
+        smoothed_pos_df["smoothed_ball_position_z"] = smoothed_xy["ball_position_z"].values
+        
+        return smoothed_pos_df
     
     
     def _compute_velos(self, df, group_by_cols, cols):
@@ -219,3 +251,17 @@ class Game:
         """
         
         return self.timestamp_df.loc[self.timestamp_df["play_id"] == play_id, "timestamp"].values
+
+    
+    
+    def get_this_play(self, play_id, which):
+        
+        if which == "ball_pos":
+            return self.new_ball_pos.loc[self.new_ball_pos["play_id"] == play_id, :]
+        elif which == "player_pos":
+            return self.new_player_pos.loc[self.new_player_pos["play_id"] == play_id, :]
+        elif which == "game_info":
+            return self.game_info_df.loc[self.game_info_df["play_id"] == play_id, :]
+        elif which == "game_events":
+            return self.game_events_df.loc[self.game_events_df["play_id"] == play_id, :]
+        
