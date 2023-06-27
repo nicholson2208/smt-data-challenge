@@ -203,7 +203,7 @@ class Baseball_Field:
         return self.fig 
         
         
-    def create_gif(self, play_id, file_path="image_outputs/"):
+    def create_gif(self, play_id, file_path="image_outputs/", tag=""):
         
         # Need to gather all of the timestamps (in a way that is robust to smoothing/snapping)
         # create a function? I think this should be plot_all_components
@@ -214,7 +214,7 @@ class Baseball_Field:
         ani = FuncAnimation(self.fig, self._gif_writer, fargs=(play_id,), frames=len(frames),
                     interval=50, repeat=True, repeat_delay = 1500)
             
-        file_name = file_path + self.game_obj.which_game + "_play" + str(play_id) + ".gif"
+        file_name = file_path + self.game_obj.which_game + "_play" + str(play_id) + tag + ".gif"
         
         ani.save(file_name, dpi=100)
         
