@@ -74,7 +74,7 @@ This returns:
 
 
 
-I guess this doesn't happen that often, but often enough that is mainly not for plays that I am going to use anyways
+I guess this doesn't happen that often, but often enough that it might mess up my out and at_bat imputing.
 
 
 ## In game_events, "play_id" and "play_per_game" not lining up
