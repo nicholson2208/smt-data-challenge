@@ -57,6 +57,8 @@ class Game:
         self.game_events_df = pd.read_csv(file_path + "game_events/game_events-" + which_game + ".csv", index_col=0)
         self.game_events_df = self._prep_events_df(self.game_events_df)
         
+        self.play_id_to_per_game_mapper = self.game_events_df[["play_id" , "play_per_game"]].drop_duplicates()
+        
         self.ball_pos_df = pd.read_csv(file_path + "ball_pos/ball_pos-" + which_game + ".csv", index_col=0)        
         
         player_pos_path = file_path + "player_pos/" + self.home_team + "/player_pos-"
@@ -261,7 +263,11 @@ class Game:
         elif which == "player_pos":
             return self.new_player_pos.loc[self.new_player_pos["play_id"] == play_id, :]
         elif which == "game_info":
-            return self.game_info_df.loc[self.game_info_df["play_id"] == play_id, :]
+            
+            # play per game, and play_id are different! 
+            
+            return self.game_info_df.loc[self.game_info_df["play_per_game"] == self.play_id_to_per_game_mapper.loc[self.play_id_to_per_game_mapper["play_id"] == play_id, "play_per_game"].values[0], :]
+        
         elif which == "game_events":
             return self.game_events_df.loc[self.game_events_df["play_id"] == play_id, :]
         

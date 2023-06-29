@@ -9,13 +9,9 @@ June 2023
 
 
 ``` python
-
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, PillowWriter
 import os
-
 
 from src.utils import *
 from src.plotting import Baseball_Field
@@ -32,12 +28,15 @@ for sub_dir, dirs, files in os.walk('data/game_events/'):
     
         all_games.append(file.split("-")[-1].split(".csv")[0])
 
+# this returns 97        
 print(len(all_games))        
 
 
 zeros = pd.DataFrame()
 
 for g in all_games:
+    
+    # a user defined object that just cleans up the data
     this_game = Game(g)
     
     zero_batters = this_game.game_info_df.loc[this_game.game_info_df["batter"] == 0, :]
@@ -78,17 +77,78 @@ This returns:
 I guess this doesn't happen that often, but often enough that is mainly not for plays that I am going to use anyways
 
 
-## In game events, "play_id" and "play_per_game" not lining up
-
-I need to use play_per_game to join!
-
-In game_info "play_per_game" does not skip it seems like, but it seems like it does in game_events
+## In game_events, "play_id" and "play_per_game" not lining up
 
 I think these are different, and I don't think I can just use them interchangeably -- I think the implication is that game_info should be the base table
 
 
-This is an example of things that are just wrong:
+### There are many instances where play_id and play_per_game are not the same
 
+I think this is becuase there must be play_per_games that have been removed?
+- Maybe like a mound visit or something?
+
+
+```python
+import numpy as np
+import pandas as pd
+import os
+
+from src.utils import *
+from src.plotting import Baseball_Field
+from src.game import Game
+
+
+# get all games into a list, so I can use my Game class
+all_games = []
+
+for sub_dir, dirs, files in os.walk('data/game_events/'):
+    for file in files:
+        if "checkpoint" in file:
+                continue
+    
+        all_games.append(file.split("-")[-1].split(".csv")[0])
+
+# this returns 97        
+print(len(all_games))        
+
+
+mismatches = pd.DataFrame()
+
+for g in all_games:
+    this_game = Game(g)
+    
+    
+    mismatched_play_ids = this_game.game_events_df.loc[this_game.game_events_df["play_id"] != this_game.game_events_df["play_per_game"], :]
+    first_mismatch = mismatched_play_ids.loc[mismatched_play_ids["play_id"].diff() != mismatched_play_ids["play_per_game"].diff(), :]
+
+    game_events_mismatched = this_game.game_events_df.loc[(this_game.game_events_df["play_per_game"].isin(first_mismatch["play_per_game"]))  &\
+                                                          (this_game.game_events_df["play_id"].isin(first_mismatch["play_id"]))
+                                                , ["game_str", "play_id", "play_per_game", "event_code"]]
+    
+    mismatches = pd.concat([mismatches, game_events_mismatched])
+
+
+# Tells me that there are 138 times where there is a discontinuity in the counting of play_id and play_per_game
+print(mismatches[["game_str", "play_id", "play_per_game"]].drop_duplicates().shape)
+
+
+```
+
+
+Here is a sample of the mismatches:
+
+|index |game_str            |play_id|play_per_game|
+|------|--------------------|-------|-------------|
+|1     |1900_01_TeamKJ_TeamB|178    |179          |
+|2     |1900_03_TeamKJ_TeamB|166    |167          |
+|3     |1900_05_TeamKK_TeamB|205    |206          |
+
+
+
+
+### There are some instances where play_id and play_per_game appear to be incorrectly indexed
+
+In the below sample, it appears that play_id, at_bat, and play_per_game stopped counting upwards! 
 
 |index|game_str|play_id|at_bat |play_per_game |timestamp |player_position  | event_code  |event             |
 |---|---------------------|---|---|----|--------|---|---|------------------|
@@ -128,9 +188,6 @@ This is an example of things that are just wrong:
 |843 |1903_02_TeamNE_TeamA2 |211 |69 |222 |8326187 |1  |1  |pitch             |
 |844 |1903_02_TeamNE_TeamA2 |211 |69 |222 |8326687 |2  |2  |ball acquired     |
 |845 |1903_02_TeamNE_TeamA2 |211 |69 |222 |8326687 |0  |5  |end of play       |
-
-
-
 
 
 
