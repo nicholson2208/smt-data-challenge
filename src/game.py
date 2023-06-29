@@ -247,6 +247,22 @@ class Game:
         
         return timestamp_df
         
+    def get_ppg_from_pid(self, play_id):
+        """
+        returns the play_per_game value from a play_id
+        """
+        
+        return self.play_id_to_per_game_mapper.loc[self.play_id_to_per_game_mapper["play_id"] == play_id, "play_per_game"].values[0]
+    
+    
+    def get_pid_from_ppg(self, play_per_game):
+        """
+        returns the play_id value from a play_per_game
+        """
+        
+        return self.play_id_to_per_game_mapper.loc[self.play_id_to_per_game_mapper["play_per_game"] == play_per_game, "play_id"].values[0]
+        
+        
     def get_this_play_ts(self, play_id):
         """
         a util for returning a specific play's timestamps
@@ -266,7 +282,7 @@ class Game:
             
             # play per game, and play_id are different! 
             
-            return self.game_info_df.loc[self.game_info_df["play_per_game"] == self.play_id_to_per_game_mapper.loc[self.play_id_to_per_game_mapper["play_id"] == play_id, "play_per_game"].values[0], :]
+            return self.game_info_df.loc[self.game_info_df["play_per_game"] == self.get_ppg_from_pid(play_id), :]
         
         elif which == "game_events":
             return self.game_events_df.loc[self.game_events_df["play_id"] == play_id, :]

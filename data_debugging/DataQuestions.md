@@ -3,9 +3,7 @@
 June 2023
 
 
-## Batters showing as 0, when there is hitting data
-
-
+## Batters showing as 0
 
 
 ``` python
@@ -75,6 +73,8 @@ This returns:
 
 
 I guess this doesn't happen that often, but often enough that it might mess up my out and at_bat imputing.
+
+I think it is often the case where the batter of the prior play ends up being the first_baserunner in plays where the batter is 0 
 
 
 ## In game_events, "play_id" and "play_per_game" not lining up
