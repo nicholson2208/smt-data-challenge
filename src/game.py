@@ -70,26 +70,35 @@ class Game:
         self.winner = None
         
         
+        self.which_half_innings_are_valid = {}
+        
         #### read in all my data ###
         
         # read in game info
         self.game_info_df = pd.read_csv(file_path + "game_info/game_info-" + which_game + ".csv", index_col=0)
         
-        # a function for computing at_bats, outs, etc 
-        self.game_info_df = self._prep_info_df(self.game_info_df)
-
-        
+        # read in game events
         self.game_events_df = pd.read_csv(file_path + "game_events/game_events-" + which_game + ".csv", index_col=0)
-        self.game_events_df = self._prep_events_df(self.game_events_df)
         
+        # play per game and play_id are not the same, make a mapper between the two
         self.play_id_to_per_game_mapper = self.game_events_df[["play_id" , "play_per_game"]].drop_duplicates()
         
+        # read in ball pos
         self.ball_pos_df = pd.read_csv(file_path + "ball_pos/ball_pos-" + which_game + ".csv", index_col=0)        
         
+        # read in play pos
         player_pos_path = file_path + "player_pos/" + self.home_team + "/player_pos-"
         player_pos_path += self.season + "_" + self.home_team + "/player_pos-" + which_game + ".csv"
         self.player_pos_df = pd.read_csv(player_pos_path, index_col=0)
         
+        
+        #### clean and impute data
+        # add a bunch of fields to events to make my life easier
+        self.game_events_df = self._prep_events_df(self.game_events_df)
+        
+        # compute some velos, descs, etc
+        self.new_player_pos = self._prep_player_pos_df(self.player_pos_df)
+                
         # fill the gaps in the ball_pos data
         self.ball_pos_df = self._fill_ball_pos_when_acquired(self.game_events_df, self.player_pos_df, self.ball_pos_df)
 
@@ -108,8 +117,10 @@ class Game:
                                                                                ]
                                                )
         
-#         self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "smoothed_ball_position_x", "smoothed_ball_position_y", "smoothed_ball_position_z"])
-        self.new_player_pos = self._compute_velos(self.player_pos_df, ["play_id", "player_position"], ["timestamp", "field_x", "field_y"])
+        # self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "smoothed_ball_position_x", "smoothed_ball_position_y", "smoothed_ball_position_z"])
+    
+        # fill in the missing players in game_info with player_pos data
+        self.game_info_df = self._prep_info_df(self.game_info_df)
         
         self.timestamp_df = self.collect_all_timestamps(self.new_ball_pos, self.new_player_pos, self.game_events_df)
         
@@ -122,9 +133,12 @@ class Game:
         
         game_string = self.which_game + "\n"
         game_string += "game_info shape: " + str(self.game_info_df.shape) + "\n"
+        game_string += "\t\tNumber of invalid half inning"
         game_string += "game_events shape: " + str(self.game_events_df.shape) + "\n"
         game_string += "ball_pos shape: " + str(self.ball_pos_df.shape) + "\n"
         game_string += "player_pos shape: " + str(self.player_pos_df.shape) + "\n"
+        
+        
         
         return game_string
     
@@ -174,20 +188,138 @@ class Game:
         return ball_pos
     
     
-    def _prep_info_df(self, df):
+    def _prep_player_pos_df(self, player_pos_df):
+        """
+        prep the player_position df
+        
+        add human readable labels, compute velos, etc
+        
+        """
+        
+        player_pos = self.player_pos_df.copy()
+        player_pos["player_position_desc"] = player_pos["player_position"].map(PLAYER_POSITION_CODE_TO_DESC)
+        
+        player_pos = self._compute_velos(player_pos, ["play_id", "player_position"], ["timestamp", "field_x", "field_y"])
+
+        return player_pos
+    
+    
+    def _prep_info_df(self, game_info_df):
         """
         A utility for adding relevant fields to game info table, like at_bat and outs, etc.
         
         """
         
-        game_info = df.copy()
+        game_info = game_info_df.copy()
         
+        ### Make some columns to be filled in with the outs
+
+
+        # the number of baserunners on a given play
+        game_info["n_br"] = game_info[["first_baserunner", "second_baserunner", "third_baserunner"]].apply(lambda row: sum(row.apply(lambda x: 0 if x == 0 else 1)), axis=1)
+
+        # placeholder columns that will get filled in
+        game_info["prev_outs"] = np.nan
+        game_info["this_play_outs"] = np.nan
+        
+        game_info["trust_this_play"] = 1
+
+        # you know for certain that there are no outs when it is the first batter in the half inning
+        switiching_sides_indices = game_info.loc[game_info["top_bottom_inning"].shift() != game_info["top_bottom_inning"]].index
+
+        # fill in a zero when there are no outs
+        game_info.loc[switiching_sides_indices, "prev_outs"] = 0
+        
+        
+        ### There are differences in the tracking data, and the game_info table
+        # try to line up the game_info and player_pos data
+        
+        game_info = self._fix_info_player_pos_br_disagreements(game_info, self.new_player_pos)
+       
         # TODO: more stuff goes here!
         pass
+    
+        # TODO: maybe do something with which_innings_are_valid
+        game_info, self.which_half_innings_are_valid = self.impute_outs(game_info)
+        
+        game_info = self._fill_whether_to_trust_half_inning(game_info)
+        
         
         return game_info
 
     
+    def _fix_info_player_pos_br_disagreements(self, game_info, player_pos):
+        """
+        
+        There are differences in the tracking data, and the game_info table
+        
+        try to line up the game_info and player_pos data
+        
+        """
+        game_info = game_info.copy()
+        
+        cols = ["play_id", "player_position_desc"]
+
+        which_brs_present_which_play = self.new_player_pos.loc[self.new_player_pos["player_position"].isin([10, 11, 12, 13])].groupby(cols).size().unstack(fill_value=0)
+        which_brs_present_which_play = which_brs_present_which_play.apply(lambda row: row.apply(lambda x: x if x == 0 else 1), axis=1)
+
+        # do the mapping between play per game and play id here
+        which_brs_present_which_play = which_brs_present_which_play.merge(self.play_id_to_per_game_mapper, how="left", on="play_id")
+        
+        
+        filled_info = game_info.merge(which_brs_present_which_play.drop("play_id", axis=1), how="left", on="play_per_game")
+
+        # TODO: fill in when batters are 0?
+        # I think the first thing is the 0 batter fill in, then then the br thing
+
+        # make a col assuming these two sources agree
+        filled_info["player_pos_and_info_agree"] = 1
+        
+        # make a flag for when they don't agree
+        filled_info.loc[((filled_info["first_baserunner"] > 0) ^ (filled_info["Runner 1st"] > 0)) |
+                        ((filled_info["second_baserunner"] > 0) ^ (filled_info["Runner 2nd"] > 0)) |
+                        ((filled_info["third_baserunner"] > 0) ^ (filled_info["Runner 3rd"] > 0))
+                        ,
+                        "player_pos_and_info_agree"] = 0
+        
+        
+        # track that something is fishy with this play
+        filled_info.loc[((filled_info["first_baserunner"] > 0) ^ (filled_info["Runner 1st"] > 0)) |
+                        ((filled_info["second_baserunner"] > 0) ^ (filled_info["Runner 2nd"] > 0)) |
+                        ((filled_info["third_baserunner"] > 0) ^ (filled_info["Runner 3rd"] > 0))
+                        ,
+                        "trust_this_play"] = 0
+
+        ## ASSUMPTION: the player_pos data is generally more accurate?
+        ## just fill in a 1 where there is a 0 in game info
+        filled_info.loc[((filled_info["first_baserunner"] == 0) & (filled_info["Runner 1st"] > 0)), "first_baserunner"] = 1
+        filled_info.loc[((filled_info["second_baserunner"] == 0) & (filled_info["Runner 2nd"] > 0)), "second_baserunner"] = 1
+        filled_info.loc[((filled_info["third_baserunner"] == 0) & (filled_info["Runner 3rd"] > 0)), "third_baserunner"] = 1
+        
+        return filled_info
+    
+    def _fill_whether_to_trust_half_inning(self, game_info):
+        """
+        theres lots of things that iffy about this data, I want to know which I should trust
+        based on whether I had to apply assumptions to get here or not
+        
+        """
+        game_info = game_info.copy()
+        
+        # if any of the plays are suspect, don't trust the whole half inning, (because you need the whole sequence for outs to work)
+        valid_halfs = game_info.groupby(["inning", "top_bottom_inning"]).min()[["trust_this_play"]].reset_index()
+        
+        # a valid half is one that has an out sequence that works
+        valid_halfs["valid_half"] = valid_halfs.apply(lambda row: 1 if (self.which_half_innings_are_valid[str(row["inning"])+"_"+row["top_bottom_inning"]]) else 0, axis=1)
+        
+        # a half you should def trust doesn't have any br gaps that needed to be squared away
+        valid_halfs["trust_this_half"] = valid_halfs.apply(lambda row: 1 if (row["trust_this_play"] and row["valid_half"]) else 0, axis=1)
+                
+        game_info = game_info.merge(valid_halfs[["inning", "top_bottom_inning", "valid_half", "trust_this_half"]], how="left", on=["inning", "top_bottom_inning"])
+        
+        return game_info
+        
+        
     def _prep_events_df(self, df):
         """
         A utility for adding useful columns to the game_events table
@@ -217,7 +349,6 @@ class Game:
         # with more effort, could do a Kalman filter?
         
         # I am not actually sure I need this
-        
         
         smoothed_pos_df = df.copy()
 
@@ -429,7 +560,7 @@ class Game:
         return False
 
     
-    def impute_outs(self, verbose = False):
+    def impute_outs(self, game_info_df, verbose = False):
         """
         The function that actually invokes the outs sequence solver
         
@@ -438,21 +569,8 @@ class Game:
         # TODO: consider making this a part of the game_info_table
         which_innings_are_valid = {}
 
-        full_game = self.game_info_df.copy()
-
-        # placeholder columns that will get filled in
-        full_game["prev_outs"] = np.nan
-        full_game["this_play_outs"] = np.nan
-
-        # the number of baserunners on a given play
-        full_game["n_br"] = full_game[["first_baserunner", "second_baserunner", "third_baserunner"]].apply(lambda row: sum(row.apply(lambda x: 0 if x == 0 else 1)), axis=1)
-
-        # you know for certain that there are no outs when it is the first batter in the half inning
-        switiching_sides_indices = full_game.loc[full_game["top_bottom_inning"].shift() != full_game["top_bottom_inning"]].index
-
-        # fill in a zero when there are no outs
-        full_game.loc[switiching_sides_indices, "prev_outs"] = 0
-
+        full_game = game_info_df.copy()
+        
         # make an array to store all of these
         running_outs_seq = np.full((full_game.shape[0], 2), -99)
         running_index = 0
@@ -533,6 +651,7 @@ class Game:
         
         return timestamp_df
         
+        
     def get_ppg_from_pid(self, play_id):
         """
         returns the play_per_game value from a play_id
@@ -548,6 +667,7 @@ class Game:
         
         return self.play_id_to_per_game_mapper.loc[self.play_id_to_per_game_mapper["play_per_game"] == play_per_game, "play_id"].values[0]
      
+        
     def get_play_id_and_ppg_for_event(self, event, **kwargs):
         """
         takes in a game_events_df
