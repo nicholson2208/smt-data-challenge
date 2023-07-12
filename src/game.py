@@ -39,7 +39,7 @@ PLAYER_POSITION_CODE_TO_DESC = {
  }
 
 class Game:
-    def __init__(self, which_game, file_path="data/"):
+    def __init__(self, which_game, file_path="data/", debug_mode=False):
         """
         When you instantiate a Game object, all of the data gets read, prepped, and cleaned
         
@@ -90,6 +90,14 @@ class Game:
         player_pos_path = file_path + "player_pos/" + self.home_team + "/player_pos-"
         player_pos_path += self.season + "_" + self.home_team + "/player_pos-" + which_game + ".csv"
         self.player_pos_df = pd.read_csv(player_pos_path, index_col=0)
+        
+        
+        if debug_mode:
+            # I think I have an infinite recursion somewhere
+            # add this so I can just skip
+            
+            return
+        
         
         
         #### clean and impute data
