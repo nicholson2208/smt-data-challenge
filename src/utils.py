@@ -1,37 +1,43 @@
+# This file contains functions/constants that will make my life easier
+
+
 import pandas as pd
 import os
 
 
 # some mappings to make my life easier
-EVENT_CODE_TO_DESC = {1 : "pitch",
-                      2 : "ball acquired",
-                      3 : "throw (ball-in-play)",
-                      4 : "ball hit into play",
-                      5 : "end of play",
-                      6 : "pickoff throw",
-                      7 : "ball acquired - unknown field position",
-                      8 : "throw (ball-in-play) - unknown field position",
-                      9 : "ball deflection",
-                      10 : "ball deflection off of wall",
-                      11 : "home run",
-                      16 : "ball bounce",
-                      None : None
-                     }
+EVENT_CODE_TO_DESC = {
+    1 : "pitch",
+    2 : "ball acquired",
+    3 : "throw (ball-in-play)",
+    4 : "ball hit into play",
+    5 : "end of play",
+    6 : "pickoff throw",
+    7 : "ball acquired - unknown field position",
+    8 : "throw (ball-in-play) - unknown field position",
+    9 : "ball deflection",
+    10 : "ball deflection off of wall",
+    11 : "home run",
+    16 : "ball bounce",
+    None : None
+ }
 
 
-PLAYER_POSITION_CODE_TO_DESC = {1 : "P",
-                      2 : "C",
-                      3 : "1B",
-                      4 : "2B",
-                      5 : "3B",
-                      6 : "SS",
-                      7 : "LF",
-                      8 : "CF",
-                      9 : "RF",
-                      10 : "Runner 1st",
-                      11 : "Runner 2nd",
-                      16 : "Runner 3rd"
-                     }
+PLAYER_POSITION_CODE_TO_DESC = {
+    1 : "P",
+    2 : "C",
+    3 : "1B",
+    4 : "2B",
+    5 : "3B",
+    6 : "SS",
+    7 : "LF",
+    8 : "CF",
+    9 : "RF",
+    10 : "Batter",
+    11 : "Runner 1st",
+    12 : "Runner 2nd",
+    13 : "Runner 3rd"
+ }
 
 
 
@@ -77,3 +83,18 @@ def concat_game_events_into_single_file(write=False, path="data/"):
     return all_game_events     
 
 
+def get_all_game_strs(path="data/"): 
+    # get all games into a list, so I can use my Game, Baseball_Field classes
+    all_games = []
+
+    for sub_dir, dirs, files in os.walk(path + 'game_events/'):
+        for file in files:
+            if "checkpoint" in file:
+                # ignore ipy checkpoints
+                    continue
+
+            all_games.append(file.split("-")[-1].split(".csv")[0])
+
+    print("Gathered a list of {} games".format(len(all_games)))     
+    
+    return all_games
