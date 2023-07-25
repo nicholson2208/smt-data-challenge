@@ -126,9 +126,23 @@ class Game:
                                                )
         
         # self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "smoothed_ball_position_x", "smoothed_ball_position_y", "smoothed_ball_position_z"])
+        
+        
+        # check whether we should bother with the timestamp lining up thing (and data rewriting?)
+        self.avg_ball_and_player_dist = self._check_positions_when_acquired(self.game_events_df, self.new_player_pos, self.new_ball_pos)
+        
+        if self.avg_ball_and_player_dist > 5:
+            print("Distance between ball and player is large on average, should maybe clean up {}".format(self.avg_ball_and_player_dist))
+        
     
         # fill in the missing players in game_info with player_pos data
         self.game_info_df = self._prep_info_df(self.game_info_df)
+        
+        
+        # compute features at the event level!
+        # add in angle of throw to first, elevation angle, norminal velo
+        self.game_events_df = self._add_throw_details_to_events(self.game_events_df)
+        
         
         self.timestamp_df = self.collect_all_timestamps(self.new_ball_pos, self.new_player_pos, self.game_events_df)
         
@@ -150,6 +164,43 @@ class Game:
         
         return game_string
     
+    def _check_positions_when_acquired(self, game_events, player_pos, ball_pos):
+        """
+        This will let me know whether I need to write that function to correct the ts, I think I won't mostly
+
+        """
+    
+        # events when the ball is acquired by not the catcher, gets rid of pitches
+        ball_acq_ts = game_events.loc[
+            (game_events["event"] == "ball acquired") & 
+            (game_events["player_position"] != 2)
+            ,
+            ["play_id", "timestamp", "player_position"]
+        ]
+
+        # where the ball is when it is acquired
+        ball_pos_when_acquired = ball_pos.loc[
+            ball_pos["timestamp"].isin(ball_acq_ts.timestamp.values), 
+            ["play_id", "ball_position_x", "ball_position_y"]
+        ]
+
+        # merge them so we can compute the dist
+        merged_pos_df = player_pos.loc[
+            (player_pos["timestamp"].isin(ball_acq_ts.timestamp.values)) &
+            (player_pos["player_position"].isin(ball_acq_ts.player_position.values)),
+            ["play_id", "field_x", "field_y"]
+        ].merge(ball_pos_when_acquired, how="left", on="play_id")
+
+        merged_pos_df["dist"] = merged_pos_df.apply(
+            lambda row: 
+            np.sqrt((row["field_x"] - row["ball_position_x"]) ** 2 + 
+                    (row["field_y"] - row["ball_position_y"]) ** 2),
+            axis = 1 
+        )
+
+        return merged_pos_df.groupby("play_id")["dist"].min().mean()
+    
+
     def _fill_ball_pos_when_acquired(self, game_events, player_pos, ball_pos):
         """
         This is making an assumption that (1) the ball data is missing when a ball is acquired and (2) that the fielder's position
@@ -399,6 +450,128 @@ class Game:
         
         return pd.concat([df, lagged_df, diff_df, velo_df], axis=1)
     
+    def _add_throw_details_to_events(self, df):
+        """
+        needs the new_ball_pos to work, needs to be a separate function
+        """
+        
+        game_events = df.copy()
+
+        
+        # a column for the xy_throw_angle, will be na if the event is not a throw
+        game_events["xy_throw_angle"] = np.nan
+        game_events["elevation_throw_angle"] = np.nan
+        game_events["throw_velo"] = np.nan
+
+
+        # fill in xy
+        game_events.loc[game_events["event"] == "throw (ball-in-play)", "xy_throw_angle"] = \
+            game_events.loc[game_events["event"] == "throw (ball-in-play)", :].apply(lambda row: \
+                        self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="xy"), axis = 1)
+        
+        # fill in elevation
+        game_events.loc[game_events["event"] == "throw (ball-in-play)", "elevation_throw_angle"] = \
+            game_events.loc[game_events["event"] == "throw (ball-in-play)", :].apply(lambda row: \
+                        self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="elevation"), axis = 1)
+        
+         # fill in velo
+        game_events.loc[game_events["event"] == "throw (ball-in-play)", "throw_velo"] = \
+            game_events.loc[game_events["event"] == "throw (ball-in-play)", :].apply(lambda row: \
+                        self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="velo"), axis = 1)
+        
+        
+        return game_events
+    
+    
+    def _compute_throw_details(self, a, which = "xy", target_point = np.array([63.63961031, 63.63961031])):
+        """
+        A utility to compute the throw angle in the xy plane to an arbitary point
+        
+        target_point defaults to first base
+
+        """
+    
+        if which == "xy":    
+            try:
+                # make a vector from the first point to the target point
+                xy_vect_to_target = target_point - a[["ball_position_x", "ball_position_y"]].iloc[0].values
+
+                # scale it to be a unit vector
+                unit_xy_vect_to_target = xy_vect_to_target / np.sqrt(xy_vect_to_target.dot(xy_vect_to_target))
+
+                # Maybe the whole window so we don't get noise?
+                throw_velo_xy_vect = a[["ball_position_x", "ball_position_y"]].iloc[-1].values \
+                    - a[["ball_position_x", "ball_position_y"]].iloc[0].values
+
+                # the other one is a unit vect, so we don't need to divide here
+                xy_angle_to_first_rad = np.arccos(throw_velo_xy_vect.dot(unit_xy_vect_to_target) / np.sqrt(throw_velo_xy_vect.dot(throw_velo_xy_vect)))
+
+                xy_angle_to_first_deg = xy_angle_to_first_rad * 180 / np.pi
+
+                # hmm there are some times where you might want to miss the bag -- e.g. throws from catcher! 
+                return xy_angle_to_first_deg
+            
+            except:
+
+                # this should only happen when there isn't ball_pos data, which happens sometimes 
+
+                return np.nan
+        elif which == "elevation":
+            # compute the angle of elevation
+            try:
+                throw_velo_vect = a[["ball_position_x", "ball_position_y", "ball_position_z"]].iloc[-1].values \
+                    - a[["ball_position_x", "ball_position_y", "ball_position_z"]].iloc[0].values
+
+                # a unit vector up
+                unit_z_vect = np.array([0, 0, 1])
+
+                # (PI/2 - radians from straight up)
+                elevation_angle_rad = (np.pi/2 - np.arccos(throw_velo_vect.dot(unit_z_vect) / np.sqrt(throw_velo_vect.dot(throw_velo_vect))))
+                elevation_angle_deg = elevation_angle_rad * 180 / np.pi
+                
+                return elevation_angle_deg
+            
+            except:
+                return np.nan
+        elif which == "velo":
+            try:
+            
+                throw_velo_vect = a[["ball_position_x", "ball_position_y", "ball_position_z"]].iloc[-1].values \
+        - a[["ball_position_x", "ball_position_y", "ball_position_z"]].iloc[0].values
+
+                ball_flight_time_sec = (a["timestamp"].iloc[-1] - a["timestamp"].iloc[0])/1000
+
+                # this is feet per (ball_flight_time) / 1.467 [fps to mph]
+                velo = np.sqrt(throw_velo_vect.dot(throw_velo_vect)) / ball_flight_time_sec / 1.467
+
+                return velo
+            except:
+                return np.nan
+            
+    
+    def _fill_throw_details(self, timestamp, ball_pos_df, which = "xy", target_point = np.array([63.63961031, 63.63961031])): 
+        """
+        the helper function to actual fill in a given throw's angle to the target point
+        
+    
+        """
+
+        # ball_pos_df = new_ball_pos_df.copy()
+
+        buffer_ms = -10
+        snapshot_time = 250
+
+        # find when the ball is in the air with a buffer or not
+        ball_in_air_df = ball_pos_df.loc[(ball_pos_df["timestamp"] >= (timestamp - buffer_ms)) &\
+                                           (ball_pos_df["timestamp"] <= (timestamp + snapshot_time)),
+                                           # (ball_pos_1903_01["timestamp"] <= temp_throws["next_event_ts"].values[0] + buffer_ms), # this is for the whole throw
+                                           :
+                                          ] 
+
+        # print(ball_in_air_df["play_id"].describe())
+        angle = self._compute_throw_details(ball_in_air_df, which=which, target_point=target_point)
+
+        return angle
     
     def _find_empty_cell(self, seq):
         """
