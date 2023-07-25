@@ -193,3 +193,12 @@ In the below sample, it appears that play_id, at_bat, and play_per_game stopped 
 
 
 ## 
+
+
+
+Other issues:
+- disagreement between runners on base
+- players not in the correct spot?
+    - its like the ball and players are not on the same time scale?
+    - some plays are good though: 1903_23_TeamNA_TeamA1_play148--steal, not picked
+
