@@ -104,35 +104,52 @@ class Game:
         # add a bunch of fields to events to make my life easier
         self.game_events_df = self._prep_events_df(self.game_events_df)
         
+        # self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "smoothed_ball_position_x", "smoothed_ball_position_y", "smoothed_ball_position_z"])
+        
+        
+        # check whether we should bother with the timestamp lining up thing (and data rewriting?)
+        self.avg_ball_and_player_dist = self._check_positions_when_acquired(
+            self.game_events_df, 
+            self.player_pos_df, 
+            self.ball_pos_df
+        )
+        
+        if self.avg_ball_and_player_dist > 5:
+            print("Distance between ball and player is large on average, should maybe clean up {}"\
+                  .format(self.avg_ball_and_player_dist))
+            
+            self.player_pos_df = self._align_ball_and_player_ts(
+                self.game_events_df, 
+                self.player_pos_df, 
+                self.ball_pos_df
+            )
+        
         # compute some velos, descs, etc
-        self.new_player_pos = self._prep_player_pos_df(self.player_pos_df)
-                
+        self.new_player_pos = self._prep_player_pos_df(self.player_pos_df)   
+        
         # fill the gaps in the ball_pos data
-        self.ball_pos_df = self._fill_ball_pos_when_acquired(self.game_events_df, self.player_pos_df, self.ball_pos_df)
+        self.ball_pos_df = self._fill_ball_pos_when_acquired(
+            self.game_events_df, 
+            self.player_pos_df, 
+            self.ball_pos_df)
 
         # smoothing should go here
         self.ball_pos_df = self._smooth_ball_position(self.ball_pos_df)
         
         # compute velocities so I have that for further analysis and plotting
         # these should get smoothed and the names and times should maybe change the name from new lol
-        self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", 
-                                                                                "ball_position_x", 
-                                                                                "ball_position_y", 
-                                                                                "ball_position_z",
-                                                                                "smoothed_ball_position_x", 
-                                                                                "smoothed_ball_position_y", 
-                                                                                "smoothed_ball_position_z"
-                                                                               ]
-                                               )
-        
-        # self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "smoothed_ball_position_x", "smoothed_ball_position_y", "smoothed_ball_position_z"])
-        
-        
-        # check whether we should bother with the timestamp lining up thing (and data rewriting?)
-        self.avg_ball_and_player_dist = self._check_positions_when_acquired(self.game_events_df, self.new_player_pos, self.new_ball_pos)
-        
-        if self.avg_ball_and_player_dist > 5:
-            print("Distance between ball and player is large on average, should maybe clean up {}".format(self.avg_ball_and_player_dist))
+        self.new_ball_pos = self._compute_velos(
+            self.ball_pos_df, 
+            ["play_id"], 
+            ["timestamp",
+             "ball_position_x", 
+             "ball_position_y", 
+             "ball_position_z",
+             "smoothed_ball_position_x", 
+             "smoothed_ball_position_y", 
+             "smoothed_ball_position_z"
+            ]
+        )
         
     
         # fill in the missing players in game_info with player_pos data
@@ -144,7 +161,11 @@ class Game:
         self.game_events_df = self._add_throw_details_to_events(self.game_events_df)
         
         
-        self.timestamp_df = self.collect_all_timestamps(self.new_ball_pos, self.new_player_pos, self.game_events_df)
+        self.timestamp_df = self.collect_all_timestamps(
+            self.new_ball_pos, 
+            self.new_player_pos, 
+            self.game_events_df
+        )
         
         self.this_ts_fielders = None
         self.this_ts_batters = None
@@ -200,6 +221,100 @@ class Game:
 
         return merged_pos_df.groupby("play_id")["dist"].min().mean()
     
+    def _align_ball_and_player_ts(self, game_events, player_pos, ball_pos, margin=3):
+        """
+        There are many instances where it seems like the ball and player are lagged in someway
+        
+        Make a function to line up timestamps based on the distance the ball is from the player 
+        that acquired the ball when it is marked as acquired
+        
+        
+        margin (int or float) defaults to 3
+             how far we allow the ball to be away from the player and still say acquired in feet
+             3 is roughly an arms length, could do better with limb data
+        
+        """
+        
+        game_events = game_events.copy()
+        player_pos = player_pos.copy()
+        ball_pos = ball_pos.copy()
+        
+        # get the player and time that the ball was first acquired
+        ball_acq_event = game_events.loc[
+            game_events["event"] == "ball acquired"
+        ].groupby("play_id")[["player_position", "timestamp"]].first()
+        
+        # get ball_position of the first ball acq for each play
+        first_ball_acq_pos = ball_pos.merge(
+            ball_acq_event, 
+            how="inner", 
+            on=["play_id", "timestamp"]
+        )[["play_id", "ball_position_x", "ball_position_y"]]
+        
+        # get the player_pos for each player that first acquires the ball for each play
+        player_pos_first_acq = player_pos.merge(
+            ball_acq_event, 
+            how="inner", 
+            on=["play_id", "player_position"], 
+            suffixes=["", "_ball_first_acq"]
+        )
+        
+        # merge the ball pos when first acquired and player dfs
+        combined_first_acq = player_pos_first_acq.merge(first_ball_acq_pos, on="play_id", how="left")
+
+        # get the distance between the ball and player who acquired
+        combined_first_acq["delta_dist"] = np.sqrt(
+            (combined_first_acq["field_x"] - combined_first_acq["ball_position_x"])**2 +\
+            (combined_first_acq["field_y"] - combined_first_acq["ball_position_y"])**2                                    
+        )
+
+        # I think the raw min won't work because you could reach for the ball and 
+        # then run over to where you picked it so have a margin and pick the first
+        # time you get close enough
+        when_within_margin = combined_first_acq[
+            combined_first_acq["delta_dist"] < margin
+        ].groupby("play_id").first()
+
+        # pick a looser margin for the other ones that don't work
+        # so we at least have coverage
+        plays_that_not_within_margin = set(combined_first_acq["play_id"].unique()) - \
+            set(when_within_margin.index)
+
+        not_within_margin = combined_first_acq.loc[
+            (combined_first_acq["play_id"].isin(plays_that_not_within_margin)) &
+            (combined_first_acq["delta_dist"] < 2*margin)
+        ].groupby("play_id").first()
+
+        all_plays = pd.concat([not_within_margin, when_within_margin]).sort_values("play_id")
+
+        # compute the lags needed for each play to line up the ball with the player + margin ft
+        ts_lag_df = (all_plays["timestamp"] - all_plays["timestamp_ball_first_acq"])     
+        ts_lag_df.name = "time_offset"
+        
+        player_pos["old_ts"] = player_pos["timestamp"]
+
+
+        # which TS to anchor to? ball makes the gif work, but ruins the events on screen
+        # its minus if merging with player pos, addition if ball
+        
+        # merge only the positive, because the others are probs 
+        # just the ball getting to the front of someone
+        new_player_pos = player_pos.merge(ts_lag_df[ts_lag_df > 0], 
+                               how = "left", 
+                               left_on="play_id",
+                               right_on="play_id"
+        )
+
+
+        new_player_pos["timestamp"] = new_player_pos.apply(
+            lambda row:                                           
+            row["old_ts"] - (row["time_offset"] if pd.notnull(row["time_offset"]) else 0),
+            axis=1
+        )
+
+        return new_player_pos
+
+    
 
     def _fill_ball_pos_when_acquired(self, game_events, player_pos, ball_pos):
         """
@@ -212,32 +327,44 @@ class Game:
         ball_pos = ball_pos.copy()
 
         # get the windows in the game where a ball is in someone's glove or hand
-        ball_acquired_windows = game_events.loc[(game_events["event_code"] == 2) & (game_events["next_event_code"] != 5), :]
+        ball_acquired_windows = game_events.loc[
+            (game_events["event_code"] == 2) & 
+            (game_events["next_event_code"] != 5)
+            ,
+            :
+        ]
 
         for player, this_ts, next_ts in zip(ball_acquired_windows["player_position"], ball_acquired_windows["timestamp"],\
                                             ball_acquired_windows["next_event_ts"]):
 
-            play_pos_during_window = player_pos.loc[(player_pos["player_position"] == player) & 
-                                                  (player_pos["timestamp"] > this_ts) & 
-                                                  (player_pos["timestamp"] < next_ts),
-                                                       :]
+            play_pos_during_window = player_pos.loc[
+                (player_pos["player_position"] == player) & 
+                (player_pos["timestamp"] > this_ts) & 
+                (player_pos["timestamp"] < next_ts),
+                :
+            ]
 
             # I might mess with this assumption later -- you could jump and be scooping or whatever here
             play_pos_during_window["ball_position_z"] = 5
 
-            play_pos_during_window = play_pos_during_window.loc[:, ["game_str", 
-                                                                    "play_id", 
-                                                                    "timestamp", 
-                                                                    "field_x", 
-                                                                    "field_y", 
-                                                                    "ball_position_z"]]
+            play_pos_during_window = play_pos_during_window.loc[
+                :, 
+                ["game_str",
+                 "play_id", 
+                 "timestamp",
+                 "field_x",
+                 "field_y",
+                 "ball_position_z"]
+            ]
             
-            play_pos_during_window.columns = ["game_str", 
-                                              "play_id", 
-                                              "timestamp", 
-                                              "ball_position_x", 
-                                              "ball_position_y", 
-                                              "ball_position_z"]
+            play_pos_during_window.columns = [
+                "game_str", 
+                "play_id", 
+                "timestamp", 
+                "ball_position_x", 
+                "ball_position_y", 
+                "ball_position_z"
+            ]
 
             ball_pos = pd.concat([ball_pos, play_pos_during_window])
 
@@ -258,7 +385,11 @@ class Game:
         player_pos = self.player_pos_df.copy()
         player_pos["player_position_desc"] = player_pos["player_position"].map(PLAYER_POSITION_CODE_TO_DESC)
         
-        player_pos = self._compute_velos(player_pos, ["play_id", "player_position"], ["timestamp", "field_x", "field_y"])
+        player_pos = self._compute_velos(
+            player_pos, 
+            ["play_id", "player_position"], 
+            ["timestamp", "field_x", "field_y"]
+        )
 
         return player_pos
     
@@ -284,7 +415,9 @@ class Game:
         game_info["trust_this_play"] = 1
 
         # you know for certain that there are no outs when it is the first batter in the half inning
-        switiching_sides_indices = game_info.loc[game_info["top_bottom_inning"].shift() != game_info["top_bottom_inning"]].index
+        switiching_sides_indices = game_info.loc[
+            game_info["top_bottom_inning"].shift() != game_info["top_bottom_inning"]
+        ].index
 
         # fill in a zero when there are no outs
         game_info.loc[switiching_sides_indices, "prev_outs"] = 0
