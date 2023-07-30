@@ -50,8 +50,6 @@ class Game:
                 - where your data lives
                 
         """
-        
-        
         # compute a bunch of info to help me later
         self.which_game = which_game
         
@@ -63,12 +61,13 @@ class Game:
         self.season = game_string_tokens[0]
         self.game_num = game_string_tokens[1]
         
+        self.ts_lag_df = None
+        
         # Possible TODOs:
         # - runs for each team
         
         # TODO: I don't know that I will fill this in for each case, but I will for the easy ones
         self.winner = None
-        
         
         self.which_half_innings_are_valid = {}
         
@@ -98,14 +97,11 @@ class Game:
             
             return
         
-        
-        
         #### clean and impute data
         # add a bunch of fields to events to make my life easier
         self.game_events_df = self._prep_events_df(self.game_events_df)
         
         # self.new_ball_pos = self._compute_velos(self.ball_pos_df, ["play_id"], ["timestamp", "smoothed_ball_position_x", "smoothed_ball_position_y", "smoothed_ball_position_z"])
-        
         
         # check whether we should bother with the timestamp lining up thing (and data rewriting?)
         self.avg_ball_and_player_dist = self._check_positions_when_acquired(
@@ -123,7 +119,7 @@ class Game:
                 self.player_pos_df, 
                 self.ball_pos_df
             )
-        
+            
         # compute some velos, descs, etc
         self.new_player_pos = self._prep_player_pos_df(self.player_pos_df)   
         
@@ -150,16 +146,13 @@ class Game:
              "smoothed_ball_position_z"
             ]
         )
-        
     
         # fill in the missing players in game_info with player_pos data
         self.game_info_df = self._prep_info_df(self.game_info_df)
         
-        
         # compute features at the event level!
         # add in angle of throw to first, elevation angle, norminal velo
         self.game_events_df = self._add_throw_details_to_events(self.game_events_df)
-        
         
         self.timestamp_df = self.collect_all_timestamps(
             self.new_ball_pos, 
@@ -181,16 +174,14 @@ class Game:
         game_string += "ball_pos shape: " + str(self.ball_pos_df.shape) + "\n"
         game_string += "player_pos shape: " + str(self.player_pos_df.shape) + "\n"
         
-        
-        
         return game_string
+    
     
     def _check_positions_when_acquired(self, game_events, player_pos, ball_pos):
         """
         This will let me know whether I need to write that function to correct the ts, I think I won't mostly
 
         """
-    
         # events when the ball is acquired by not the catcher, gets rid of pitches
         ball_acq_ts = game_events.loc[
             (game_events["event"] == "ball acquired") & 
@@ -221,6 +212,7 @@ class Game:
 
         return merged_pos_df.groupby("play_id")["dist"].min().mean()
     
+    
     def _align_ball_and_player_ts(self, game_events, player_pos, ball_pos, margin=3):
         """
         There are many instances where it seems like the ball and player are lagged in someway
@@ -234,65 +226,82 @@ class Game:
              3 is roughly an arms length, could do better with limb data
         
         """
-        
         game_events = game_events.copy()
         player_pos = player_pos.copy()
         ball_pos = ball_pos.copy()
         
-        # get the player and time that the ball was first acquired
+        # get all of the players and times when the ball was acquired
         ball_acq_event = game_events.loc[
             game_events["event"] == "ball acquired"
-        ].groupby("play_id")[["player_position", "timestamp"]].first()
+        ][["play_id", "player_position", "timestamp"]]
         
-        # get ball_position of the first ball acq for each play
-        first_ball_acq_pos = ball_pos.merge(
+        # get ball_position of all the ball acq for each play
+        ball_acq_pos = ball_pos.merge(
             ball_acq_event, 
             how="inner", 
             on=["play_id", "timestamp"]
         )[["play_id", "ball_position_x", "ball_position_y"]]
         
         # get the player_pos for each player that first acquires the ball for each play
-        player_pos_first_acq = player_pos.merge(
+        player_pos_acq = player_pos.merge(
             ball_acq_event, 
             how="inner", 
             on=["play_id", "player_position"], 
-            suffixes=["", "_ball_first_acq"]
+            suffixes=["", "_ball_acq"]
         )
         
         # merge the ball pos when first acquired and player dfs
-        combined_first_acq = player_pos_first_acq.merge(first_ball_acq_pos, on="play_id", how="left")
+        combined_acq = player_pos_acq.merge(ball_acq_pos, on="play_id", how="left")
 
         # get the distance between the ball and player who acquired
-        combined_first_acq["delta_dist"] = np.sqrt(
-            (combined_first_acq["field_x"] - combined_first_acq["ball_position_x"])**2 +\
-            (combined_first_acq["field_y"] - combined_first_acq["ball_position_y"])**2                                    
+        combined_acq["delta_dist"] = np.sqrt(
+            (combined_acq["field_x"] - combined_acq["ball_position_x"])**2 +\
+            (combined_acq["field_y"] - combined_acq["ball_position_y"])**2                                    
         )
 
         # I think the raw min won't work because you could reach for the ball and 
         # then run over to where you picked it so have a margin and pick the first
         # time you get close enough
-        when_within_margin = combined_first_acq[
-            combined_first_acq["delta_dist"] < margin
-        ].groupby("play_id").first()
+        when_within_margin = combined_acq[
+            combined_acq["delta_dist"] < margin
+        ].groupby(["play_id", "player_position"]).min("delta_dist")
+        
+        when_within_margin["time_offset"] = (when_within_margin["timestamp"] - when_within_margin["timestamp_ball_acq"])
+        
+        # self.ts_lag_df = when_within_margin
+        # this step picks corrects for the case where the first acquiring player
+        # doesn't have to move (and thus is already in the correct spot too early)
+        when_within_margin =  when_within_margin.loc[
+            when_within_margin.groupby("play_id")["time_offset"].idxmax()
+        ]
+ 
+        plays_within_margin = when_within_margin.reset_index()["play_id"].unique()
 
         # pick a looser margin for the other ones that don't work
         # so we at least have coverage
-        plays_that_not_within_margin = set(combined_first_acq["play_id"].unique()) - \
-            set(when_within_margin.index)
+        plays_that_not_within_margin = set(combined_acq["play_id"].unique()) - \
+            set(plays_within_margin)
 
-        not_within_margin = combined_first_acq.loc[
-            (combined_first_acq["play_id"].isin(plays_that_not_within_margin)) &
-            (combined_first_acq["delta_dist"] < 2*margin)
-        ].groupby("play_id").first()
-
-        all_plays = pd.concat([not_within_margin, when_within_margin]).sort_values("play_id")
-
-        # compute the lags needed for each play to line up the ball with the player + margin ft
-        ts_lag_df = (all_plays["timestamp"] - all_plays["timestamp_ball_first_acq"])     
-        ts_lag_df.name = "time_offset"
+        not_within_margin = combined_acq.loc[
+            (combined_acq["play_id"].isin(plays_that_not_within_margin)) &
+            (combined_acq["delta_dist"] < (2 * margin))
+        ].groupby(["play_id", "player_position"]).min()
         
-        player_pos["old_ts"] = player_pos["timestamp"]
+        not_within_margin["time_offset"] = (not_within_margin["timestamp"] - not_within_margin["timestamp_ball_acq"])
 
+        not_within_margin =  not_within_margin.loc[
+            not_within_margin.groupby("play_id")["time_offset"].idxmax()
+        ]
+        
+        all_plays = pd.concat([not_within_margin, when_within_margin]).sort_values("play_id")        
+            
+        # we already computed the lags needed for each play to line up the ball with the player + margin
+        ts_lag_df = all_plays.reset_index()[["play_id", "time_offset"]]
+
+        # put this into a df, so I can inspect later
+        self.ts_lag_df = ts_lag_df
+
+        player_pos["old_ts"] = player_pos["timestamp"]
 
         # which TS to anchor to? ball makes the gif work, but ruins the events on screen
         # its minus if merging with player pos, addition if ball
@@ -304,8 +313,7 @@ class Game:
                                left_on="play_id",
                                right_on="play_id"
         )
-
-
+        
         new_player_pos["timestamp"] = new_player_pos.apply(
             lambda row:                                           
             row["old_ts"] - (row["time_offset"] if pd.notnull(row["time_offset"]) else 0),
@@ -315,7 +323,6 @@ class Game:
         return new_player_pos
 
     
-
     def _fill_ball_pos_when_acquired(self, game_events, player_pos, ball_pos):
         """
         This is making an assumption that (1) the ball data is missing when a ball is acquired and (2) that the fielder's position
@@ -452,14 +459,28 @@ class Game:
         
         cols = ["play_id", "player_position_desc"]
 
-        which_brs_present_which_play = self.new_player_pos.loc[self.new_player_pos["player_position"].isin([10, 11, 12, 13])].groupby(cols).size().unstack(fill_value=0)
-        which_brs_present_which_play = which_brs_present_which_play.apply(lambda row: row.apply(lambda x: x if x == 0 else 1), axis=1)
+        which_brs_present_which_play = self.new_player_pos.loc[
+            self.new_player_pos["player_position"].isin([10, 11, 12, 13])
+        ].groupby(cols).size().unstack(fill_value=0)
+        
+        which_brs_present_which_play = which_brs_present_which_play.apply(
+            lambda row: 
+            row.apply(lambda x: x if x == 0 else 1)
+            , axis=1
+        )
 
         # do the mapping between play per game and play id here
-        which_brs_present_which_play = which_brs_present_which_play.merge(self.play_id_to_per_game_mapper, how="left", on="play_id")
+        which_brs_present_which_play = which_brs_present_which_play.merge(
+            self.play_id_to_per_game_mapper, 
+            how="left", 
+            on="play_id"
+        )
         
-        
-        filled_info = game_info.merge(which_brs_present_which_play.drop("play_id", axis=1), how="left", on="play_per_game")
+        filled_info = game_info.merge(
+            which_brs_present_which_play.drop("play_id", axis=1), 
+            how="left", 
+            on="play_per_game"
+        )
 
         # TODO: fill in when batters are 0?
         # I think the first thing is the 0 batter fill in, then then the br thing
@@ -468,27 +489,46 @@ class Game:
         filled_info["player_pos_and_info_agree"] = 1
         
         # make a flag for when they don't agree
-        filled_info.loc[((filled_info["first_baserunner"] > 0) ^ (filled_info["Runner 1st"] > 0)) |
-                        ((filled_info["second_baserunner"] > 0) ^ (filled_info["Runner 2nd"] > 0)) |
-                        ((filled_info["third_baserunner"] > 0) ^ (filled_info["Runner 3rd"] > 0))
-                        ,
-                        "player_pos_and_info_agree"] = 0
+        filled_info.loc[
+            ((filled_info["first_baserunner"] > 0) ^ (filled_info["Runner 1st"] > 0)) |
+            ((filled_info["second_baserunner"] > 0) ^ (filled_info["Runner 2nd"] > 0)) |
+            ((filled_info["third_baserunner"] > 0) ^ (filled_info["Runner 3rd"] > 0))
+            ,
+            "player_pos_and_info_agree"
+        ] = 0
         
         
         # track that something is fishy with this play
-        filled_info.loc[((filled_info["first_baserunner"] > 0) ^ (filled_info["Runner 1st"] > 0)) |
-                        ((filled_info["second_baserunner"] > 0) ^ (filled_info["Runner 2nd"] > 0)) |
-                        ((filled_info["third_baserunner"] > 0) ^ (filled_info["Runner 3rd"] > 0))
-                        ,
-                        "trust_this_play"] = 0
+        filled_info.loc[
+            ((filled_info["first_baserunner"] > 0) ^ (filled_info["Runner 1st"] > 0)) |
+            ((filled_info["second_baserunner"] > 0) ^ (filled_info["Runner 2nd"] > 0)) |
+            ((filled_info["third_baserunner"] > 0) ^ (filled_info["Runner 3rd"] > 0))
+            ,
+            "trust_this_play"
+        ] = 0
 
         ## ASSUMPTION: the player_pos data is generally more accurate?
         ## just fill in a 1 where there is a 0 in game info
-        filled_info.loc[((filled_info["first_baserunner"] == 0) & (filled_info["Runner 1st"] > 0)), "first_baserunner"] = 1
-        filled_info.loc[((filled_info["second_baserunner"] == 0) & (filled_info["Runner 2nd"] > 0)), "second_baserunner"] = 1
-        filled_info.loc[((filled_info["third_baserunner"] == 0) & (filled_info["Runner 3rd"] > 0)), "third_baserunner"] = 1
+        filled_info.loc[
+            ((filled_info["first_baserunner"] == 0) &
+             (filled_info["Runner 1st"] > 0))
+            , "first_baserunner"
+        ] = 1
+        
+        filled_info.loc[
+            ((filled_info["second_baserunner"] == 0) &
+             (filled_info["Runner 2nd"] > 0))
+            , "second_baserunner"
+        ] = 1
+        
+        filled_info.loc[
+            ((filled_info["third_baserunner"] == 0) &
+             (filled_info["Runner 3rd"] > 0))
+            , "third_baserunner"
+        ] = 1
         
         return filled_info
+    
     
     def _fill_whether_to_trust_half_inning(self, game_info):
         """
@@ -499,15 +539,28 @@ class Game:
         game_info = game_info.copy()
         
         # if any of the plays are suspect, don't trust the whole half inning, (because you need the whole sequence for outs to work)
-        valid_halfs = game_info.groupby(["inning", "top_bottom_inning"]).min()[["trust_this_play"]].reset_index()
+        valid_halfs = game_info.groupby(
+            ["inning", "top_bottom_inning"]
+        ).min()[["trust_this_play"]].reset_index()
         
         # a valid half is one that has an out sequence that works
-        valid_halfs["valid_half"] = valid_halfs.apply(lambda row: 1 if (self.which_half_innings_are_valid[str(row["inning"])+"_"+row["top_bottom_inning"]]) else 0, axis=1)
+        valid_halfs["valid_half"] = valid_halfs.apply(
+            lambda row: 
+            1 if (self.which_half_innings_are_valid[str(row["inning"])+"_"+row["top_bottom_inning"]]) else 0
+            , axis=1
+        )
         
         # a half you should def trust doesn't have any br gaps that needed to be squared away
-        valid_halfs["trust_this_half"] = valid_halfs.apply(lambda row: 1 if (row["trust_this_play"] and row["valid_half"]) else 0, axis=1)
+        valid_halfs["trust_this_half"] = valid_halfs.apply(
+            lambda row: 1 if (row["trust_this_play"] and row["valid_half"]) else 0
+            , axis=1
+        )
                 
-        game_info = game_info.merge(valid_halfs[["inning", "top_bottom_inning", "valid_half", "trust_this_half"]], how="left", on=["inning", "top_bottom_inning"])
+        game_info = game_info.merge(
+            valid_halfs[["inning", "top_bottom_inning", "valid_half", "trust_this_half"]], 
+            how="left", 
+            on=["inning", "top_bottom_inning"]
+        )
         
         return game_info
         
@@ -552,7 +605,6 @@ class Game:
 
         smoothed_xy = df.groupby("play_id")[["timestamp", "ball_position_x", "ball_position_y", "ball_position_z"]]\
             .rolling(3, center=True, closed="both").mean()
-                
  
         smoothed_pos_df["smoothed_ball_position_x"] = smoothed_xy["ball_position_x"].values
         smoothed_pos_df["smoothed_ball_position_y"] = smoothed_xy["ball_position_y"].values
@@ -598,19 +650,42 @@ class Game:
 
 
         # fill in xy
-        game_events.loc[game_events["event"] == "throw (ball-in-play)", "xy_throw_angle"] = \
-            game_events.loc[game_events["event"] == "throw (ball-in-play)", :].apply(lambda row: \
-                        self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="xy"), axis = 1)
+        game_events.loc[
+            game_events["event"] == "throw (ball-in-play)", 
+            "xy_throw_angle"
+        ] = game_events.loc[
+            game_events["event"] == "throw (ball-in-play)"
+            , :
+        ].apply(
+            lambda row: \
+            self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="xy")
+            , axis = 1
+        )
         
         # fill in elevation
-        game_events.loc[game_events["event"] == "throw (ball-in-play)", "elevation_throw_angle"] = \
-            game_events.loc[game_events["event"] == "throw (ball-in-play)", :].apply(lambda row: \
-                        self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="elevation"), axis = 1)
+        game_events.loc[
+            game_events["event"] == "throw (ball-in-play)", 
+            "elevation_throw_angle"
+        ] = \
+            game_events.loc[
+            game_events["event"] == "throw (ball-in-play)",
+            :
+        ].apply(lambda row: \
+                self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="elevation")
+                , axis = 1
+               )
         
          # fill in velo
-        game_events.loc[game_events["event"] == "throw (ball-in-play)", "throw_velo"] = \
-            game_events.loc[game_events["event"] == "throw (ball-in-play)", :].apply(lambda row: \
-                        self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="velo"), axis = 1)
+        game_events.loc[
+            game_events["event"] == "throw (ball-in-play)",
+            "throw_velo"
+        ] = game_events.loc[
+            game_events["event"] == "throw (ball-in-play)"
+            , :
+        ].apply(lambda row: \
+                self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="velo")
+                , axis = 1
+               )
         
         
         return game_events
