@@ -965,7 +965,11 @@ class Game:
         can be used outside of the obejct too
         """
 
-        timestamp_df = pd.concat([self.new_ball_pos[cols], self.new_player_pos[cols], self.game_events_df[cols]]).groupby("play_id").value_counts().reset_index() 
+        timestamp_df = pd.concat([
+            self.new_ball_pos[cols],
+            self.new_player_pos[cols], 
+            self.game_events_df[cols]
+        ]).groupby("play_id").value_counts().reset_index() 
 
         timestamp_df = timestamp_df[cols].drop_duplicates().sort_values(cols)
         
