@@ -146,6 +146,7 @@ class Game:
              "smoothed_ball_position_z"
             ]
         )
+
     
         # fill in the missing players in game_info with player_pos data
         self.game_info_df = self._prep_info_df(self.game_info_df)
@@ -159,6 +160,7 @@ class Game:
             self.new_player_pos, 
             self.game_events_df
         )
+
         
         self.this_ts_fielders = None
         self.this_ts_batters = None
@@ -686,6 +688,7 @@ class Game:
                 self._fill_throw_details(row["timestamp"], self.new_ball_pos, which="velo")
                 , axis = 1
                )
+
         
         
         return game_events
