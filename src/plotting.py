@@ -157,14 +157,21 @@ class Baseball_Field:
         # plt.show()
         return fig, ax
     
-    def clear_plot(self):
+    def clear_plot(self, fielders=True, batters=True, ball=True, events=True):
         """
         a convenience function to clear a plot, so you can reuse the same objects
         """
-        self.remove_fielders_from_plot()
-        self.remove_batters_from_plot()
-        self.remove_ball_from_plot()
-        self.remove_event_annotations_from_plot()
+        if fielders:
+            self.remove_fielders_from_plot()
+        
+        if batters:
+            self.remove_batters_from_plot()
+
+        if ball:
+            self.remove_ball_from_plot()
+        
+        if events:
+            self.remove_event_annotations_from_plot()
     
     def plot_all_components(self, play_id=None, frame_index=None,
                             timestamp=None, show_velos=False, show_trails=False):
@@ -199,7 +206,10 @@ class Baseball_Field:
     # @staticmethod
     def _gif_writer(self, i, play_id):
         
-        self.clear_plot()
+        if i == 0:
+            self.clear_plot()
+        else:
+            self.clear_plot(events=False)
         self.plot_all_components(play_id=play_id, frame_index=i)
         
         return self.fig 
@@ -212,7 +222,6 @@ class Baseball_Field:
         
         frames = self.game_obj.get_this_play_ts(play_id)
 
-        
         ani = FuncAnimation(self.fig, self._gif_writer, fargs=(play_id,), frames=len(frames),
                     interval=50, repeat=True, repeat_delay = 1500)
             
@@ -481,10 +490,15 @@ class Baseball_Field:
             # this means to plot the whole play
             
             
-            this_play_events = self.game_obj.game_events_df.loc[(self.game_obj.game_events_df["play_id"] == play_id),
-                                                               :].copy()
+            this_play_events = self.game_obj.game_events_df.loc[
+                (self.game_obj.game_events_df["play_id"] == play_id),
+                :
+            ].copy()
             
-            event_descs = this_play_events.apply(lambda row: str(row["timestamp"]) + ": " + str(row["event"]) + " by " + str(row["player_position"]), axis = 1).values
+            event_descs = this_play_events.apply(
+                lambda row: 
+                str(row["timestamp"]) + ": " + str(row["event"]) + " by " + str(row["player_position"])
+                , axis = 1).values
             
             
             y_text_spacing = 12
@@ -495,26 +509,30 @@ class Baseball_Field:
             
             
         elif timestamp:
-            this_play_events = self.game_obj.game_events_df.loc[(self.game_obj.game_events_df["play_id"] == play_id),
-                                                               :].copy()
+            this_play_events = self.game_obj.game_events_df.loc[
+                (self.game_obj.game_events_df["play_id"] == play_id),
+                :
+            ].copy()
             
             this_ts_event = this_play_events.loc[this_play_events["timestamp"] == timestamp]
             
         elif type(frame_index) == int:
             frames = self.game_obj.get_this_play_ts(play_id)
             
-            this_play_events = self.game_obj.game_events_df.loc[(self.game_obj.game_events_df["play_id"] == play_id),
-                                                               :].copy()
+            this_play_events = self.game_obj.game_events_df.loc[
+                (self.game_obj.game_events_df["play_id"] == play_id),
+                :
+            ].copy()
             
-            this_ts_event = this_play_events.loc[this_play_events["timestamp"] == frames[frame_index]]
-
-
+            this_ts_event = this_play_events.loc[
+                this_play_events["timestamp"] == frames[frame_index]
+            ]
         
         # if there is nothing in this timestamp, just quit
         if this_ts_event.shape[0] == 0:
             return
         
-        if len(self.event_annotation_artist):
+        if len(self.event_annotation_artist):            
             for artist in self.event_annotation_artist:
                 artist.remove()
         
