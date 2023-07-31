@@ -155,6 +155,9 @@ class Game:
         # add in angle of throw to first, elevation angle, norminal velo
         self.game_events_df = self._add_throw_details_to_events(self.game_events_df)
         
+        # add more features for the batter at event level
+        self.game_events_df = self._add_player_details_to_events(self.game_events_df)
+        
         self.timestamp_df = self.collect_all_timestamps(
             self.new_ball_pos, 
             self.new_player_pos, 
@@ -784,6 +787,140 @@ class Game:
 
         return angle
     
+    def _compute_player_details_at_throw(self, player_data, which=None, target_point = np.array([63.63961031, 63.63961031])):
+        """
+        for computing things like distance to first, etc
+        
+        """
+        
+        # find the x, y pos of the batter at the time of throw
+        # player pos and velo
+
+        try:
+        
+            batter_pos_at_throw = player_data[["field_x", "field_y"]].values[0]
+
+            batter_vect_to_first = (target_point - batter_pos_at_throw)
+
+            # find the distance of the batter to first (in ft)
+            batter_dist_to_first = np.sqrt(batter_vect_to_first.dot(batter_vect_to_first))
+
+            return batter_dist_to_first
+        except:
+            return np.nan
+    
+    def _fill_player_details_at_throw(self, timestamp, player_pos_df, which=None, thrower_position=None, target_point = np.array([63.63961031, 63.63961031])): 
+        """
+        a helper for filling in player details
+        """
+        player_stat = np.nan
+        
+        if which == "batter_dist":
+            batter_data = player_pos_df.loc[
+                (player_pos_df["timestamp"] == timestamp) &\
+                (player_pos_df["player_position"] == 10)
+                , ["play_id", "field_x", "field_y", "velo_x", "velo_y"]
+            ]
+
+            player_stat = self._compute_player_details_at_throw(batter_data, which=which, target_point=target_point)
+        
+        elif which == "thrower_x":
+            
+            try:
+                player_stat = player_pos_df.loc[
+                    (player_pos_df["timestamp"] == timestamp) &\
+                    (player_pos_df["player_position"] == thrower_position)
+                    , "field_x"
+                ].values[0]
+            except:
+                pass
+        
+        elif which == "thrower_y":
+            try:
+                player_stat = player_pos_df.loc[
+                    (player_pos_df["timestamp"] == timestamp) &\
+                    (player_pos_df["player_position"] == thrower_position)
+                    , "field_y"
+                ].values[0]
+            except:
+                pass
+            
+        
+        return player_stat
+        
+    
+    def _add_player_details_to_events(self, df):
+        """
+        needs the new_ball_pos to work, needs to be a separate function
+        """
+        game_events = df.copy()
+
+        
+        # a column for the batter dist to first, will be na if the event is not a throw
+        game_events["batter_dist_to_first"] = np.nan
+        
+        # a column for the 
+        game_events["thrower_x"] = np.nan
+        
+        game_events["thrower_y"] = np.nan
+
+
+        
+        
+        # fill in batter dist from first for all events
+        game_events.loc[
+            # If I do this for all events I will have deltas that I can mess with in event to compute velo after the fact!
+            :,
+            #game_events["event"] == "throw (ball-in-play)", 
+            "batter_dist_to_first"
+        ] = game_events.loc[
+            : # game_events["event"] == "throw (ball-in-play)"
+            , :
+        ].apply(
+            lambda row: \
+            self._fill_player_details_at_throw(row["timestamp"], self.new_player_pos, which="batter_dist")
+            , axis = 1
+        )
+        
+        game_events.loc[
+           game_events["event"] == "throw (ball-in-play)", 
+            "thrower_x"
+        ] = game_events.loc[
+            game_events["event"] == "throw (ball-in-play)"
+            , :
+        ].apply(
+            lambda row: \
+            self._fill_player_details_at_throw(
+                row["timestamp"], 
+                self.new_player_pos, 
+                which="thrower_x", 
+                thrower_position=row["player_position"]
+            )
+            , axis = 1
+        )
+        
+        # thrower y
+        game_events.loc[
+           game_events["event"] == "throw (ball-in-play)", 
+            "thrower_y"
+        ] = game_events.loc[
+            game_events["event"] == "throw (ball-in-play)"
+            , :
+        ].apply(
+            lambda row: \
+            self._fill_player_details_at_throw(
+                row["timestamp"], 
+                self.new_player_pos, 
+                which="thrower_y", 
+                thrower_position=row["player_position"]
+            )
+            , axis = 1
+        )
+        
+    
+        return game_events
+    
+        
     def _find_empty_cell(self, seq):
         """
         a util that takes an (n, 2) np.array() object and finds the index of the next nan value
@@ -798,7 +935,7 @@ class Game:
                 return i
 
         return index
-
+    
 
     def _is_valid_outs_assignment(self, half_inning_df, seq, this_play_outs, empty_cell_index):
         """
