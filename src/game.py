@@ -155,8 +155,12 @@ class Game:
         # add in angle of throw to first, elevation angle, norminal velo
         self.game_events_df = self._add_throw_details_to_events(self.game_events_df)
         
-        # add more features for the batter at event level
-        self.game_events_df = self._add_player_details_to_events(self.game_events_df)
+        # add more features for the thrower, batter, ball at event level
+        self.game_events_df = self._add_player_details_to_events(
+            self.game_events_df,
+            self.new_ball_pos, 
+            self.new_player_pos
+        )
         
         self.timestamp_df = self.collect_all_timestamps(
             self.new_ball_pos, 
@@ -823,7 +827,8 @@ class Game:
             ]
 
             player_stat = self._compute_player_details_at_throw(batter_data, which=which, target_point=target_point)
-        
+
+      
         elif which == "thrower_x":
             
             try:
@@ -844,28 +849,56 @@ class Game:
                 ].values[0]
             except:
                 pass
+
+        """
+        elif which == "batter_x":
             
+            try:
+                player_stat = player_pos_df.loc[
+                    (player_pos_df["timestamp"] == timestamp) &\
+                    (player_pos_df["player_position"] == 10)
+                    , "field_x"
+                ].values[0]
+            except:
+                pass
+        
+        elif which == "batter_y":
+            try:
+                player_stat = player_pos_df.loc[
+                    (player_pos_df["timestamp"] == timestamp) &\
+                    (player_pos_df["player_position"] == 10)
+                    , "field_y"
+                ].values[0]
+            except:
+                pass
+        """
         
         return player_stat
         
     
-    def _add_player_details_to_events(self, df):
+    def _add_player_details_to_events(self, df, ball_pos, player_pos):
         """
         needs the new_ball_pos to work, needs to be a separate function
         """
         game_events = df.copy()
+        ball_pos = ball_pos.copy()
+        player_pos = player_pos.copy()
+
 
         
         # a column for the batter dist to first, will be na if the event is not a throw
         game_events["batter_dist_to_first"] = np.nan
+
+                
         
-        # a column for the 
         game_events["thrower_x"] = np.nan
-        
         game_events["thrower_y"] = np.nan
-
-
         
+        """
+        game_events["batter_x"] = np.nan
+        game_events["batter_y"] = np.nan
+
+        """
         
         # fill in batter dist from first for all events
         game_events.loc[
@@ -881,7 +914,10 @@ class Game:
             self._fill_player_details_at_throw(row["timestamp"], self.new_player_pos, which="batter_dist")
             , axis = 1
         )
-        
+
+
+        # fill in thrower x for all throws
+        # can't just be a merge because we don't know the thrower a priori
         game_events.loc[
            game_events["event"] == "throw (ball-in-play)", 
             "thrower_x"
@@ -899,7 +935,7 @@ class Game:
             , axis = 1
         )
         
-        # thrower y
+        # thrower y for all throws
         game_events.loc[
            game_events["event"] == "throw (ball-in-play)", 
             "thrower_y"
@@ -917,7 +953,31 @@ class Game:
             , axis = 1
         )
         
-    
+
+        # everything that doesn't need to be computed can just be a merge!
+
+        # fill in ball xyz for all events
+        # I can merge on TS because I have already lined up the ball and players!
+        game_events = game_events.merge(
+            ball_pos[["timestamp", "ball_position_x", "ball_position_y", "ball_position_z"]],
+            how = "left",
+            on = "timestamp"            
+        ) 
+        
+        # change names of cols for the batter, merge to get batter_x and batter_y
+        batter_df = player_pos.loc[ 
+            (player_pos["player_position"] == 10), 
+            ["timestamp", "field_x", "field_y"]
+        ]
+        
+        batter_df.rename(columns={"field_x" : "batter_x", "field_y" : "batter_y"}, inplace=True)
+        
+        game_events = game_events.merge(
+            batter_df,
+            how = "left",
+            on = "timestamp"            
+        ) 
+               
         return game_events
     
         
