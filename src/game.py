@@ -38,6 +38,23 @@ PLAYER_POSITION_CODE_TO_DESC = {
     13 : "Runner 3rd"
  }
 
+GAME_INFO_PLAYER_POSITION_DESC_TO_CODE = {
+    "pitcher" : 1,
+    "catcher" : 2,
+    "first_base" : 3,
+    "second_base" : 4,
+    "third_base" : 5,
+    "shortstop" : 6,
+    "left_field" : 7,
+    "center_field" : 8,
+    "right_field" : 9,
+    "batter" : 10,
+    "first_baserunner" : 11,
+    "second_baserunner" : 12,
+    "third_baserunner" : 13
+ }
+
+
 class Game:
     def __init__(self, which_game, file_path="data/", debug_mode=False):
         """
@@ -159,7 +176,8 @@ class Game:
         self.game_events_df = self._add_player_details_to_events(
             self.game_events_df,
             self.new_ball_pos, 
-            self.new_player_pos
+            self.new_player_pos,
+            self.game_info_df
         )
         
         self.timestamp_df = self.collect_all_timestamps(
@@ -876,20 +894,18 @@ class Game:
         return player_stat
         
     
-    def _add_player_details_to_events(self, df, ball_pos, player_pos):
+    def _add_player_details_to_events(self, df, ball_pos, player_pos, game_info):
         """
         needs the new_ball_pos to work, needs to be a separate function
         """
         game_events = df.copy()
         ball_pos = ball_pos.copy()
         player_pos = player_pos.copy()
+        game_info = game_info.copy()
 
 
-        
         # a column for the batter dist to first, will be na if the event is not a throw
         game_events["batter_dist_to_first"] = np.nan
-
-                
         
         game_events["thrower_x"] = np.nan
         game_events["thrower_y"] = np.nan
@@ -977,6 +993,26 @@ class Game:
             how = "left",
             on = "timestamp"            
         ) 
+        
+        
+        # fill in a field for player_id for every event! 
+        long_play_player_ids = pd.melt(
+            game_info[list(GAME_INFO_PLAYER_POSITION_DESC_TO_CODE.keys()) + ['game_str', 'play_per_game']],
+            id_vars=['play_per_game'],
+            var_name = "player_position",
+            value_name = "player_id"
+        )
+
+        # map the position names back to the numbers (pitcher -> 1, etc)
+        long_play_player_ids["player_position"] = long_play_player_ids["player_position"].apply(
+            lambda x: GAME_INFO_PLAYER_POSITION_DESC_TO_CODE[x] if x in GAME_INFO_PLAYER_POSITION_DESC_TO_CODE.keys() else x
+        )
+
+        game_events = game_events.merge(
+            long_play_player_ids,
+            on=["play_per_game", "player_position"],
+            how="left"
+        )
                
         return game_events
     
