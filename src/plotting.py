@@ -16,7 +16,7 @@ from src.game import Game
 class Baseball_Field:
     # originally inspired by this!
     # https://www.kaggle.com/code/debojit23/baseball-field-structure-matplotlib
-    def __init__(self, which_game, figsize=(12,12)):
+    def __init__(self, which_game, figsize=(12,12), which_outs=["full_seq", "at_first"]):
         
         plt.ioff()
         self.figsize = figsize
@@ -24,7 +24,7 @@ class Baseball_Field:
         
         # a Game object takes all of the data for a given game
         # and does common data cleaning tasks
-        self.game_obj = Game(which_game)
+        self.game_obj = Game(which_game, which_outs=which_outs)
         
         
         # these are needed so you can clear some of the figure, but not all

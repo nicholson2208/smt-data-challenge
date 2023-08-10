@@ -54,9 +54,11 @@ GAME_INFO_PLAYER_POSITION_DESC_TO_CODE = {
     "third_baserunner" : 13
  }
 
+FIRST_BASE_COORDS = np.array([63.63961031, 63.63961031])
+
 
 class Game:
-    def __init__(self, which_game, file_path="data/", debug_mode=False):
+    def __init__(self, which_game, file_path="data/", debug_mode=False, which_outs=["full_seq", "at_first"]):
         """
         When you instantiate a Game object, all of the data gets read, prepped, and cleaned
         
@@ -87,6 +89,9 @@ class Game:
         self.winner = None
         
         self.which_half_innings_are_valid = {}
+        
+        # which way to compute outs
+        self.which_outs = which_outs
         
         #### read in all my data ###
         
@@ -179,6 +184,14 @@ class Game:
             self.new_player_pos,
             self.game_info_df
         )
+        
+        
+        ## Need to do this at the end because it relies on throw and player details computed above!
+        
+        if "at_first" in self.which_outs:
+        
+            self.game_info_df  = self._fill_outs_at_first(self.game_info_df)
+
         
         self.timestamp_df = self.collect_all_timestamps(
             self.new_ball_pos, 
@@ -456,20 +469,23 @@ class Game:
         # fill in a zero when there are no outs
         game_info.loc[switiching_sides_indices, "prev_outs"] = 0
         
+        if "full_seq" in self.which_outs:
+
         
-        ### There are differences in the tracking data, and the game_info table
-        # try to line up the game_info and player_pos data
-        
-        game_info = self._fix_info_player_pos_br_disagreements(game_info, self.new_player_pos)
-       
-        # TODO: more stuff goes here!
-        pass
+            ### There are differences in the tracking data, and the game_info table
+            # try to line up the game_info and player_pos data
+
+            game_info = self._fix_info_player_pos_br_disagreements(game_info, self.new_player_pos)
+
+            # TODO: more stuff goes here!
+            pass
     
-        # TODO: maybe do something with which_innings_are_valid
-        game_info, self.which_half_innings_are_valid = self.impute_outs(game_info)
-        
-        game_info = self._fill_whether_to_trust_half_inning(game_info)
-        
+    
+            # TODO: maybe do something with which_innings_are_valid
+            game_info, self.which_half_innings_are_valid = self.impute_outs(game_info)
+
+            game_info = self._fill_whether_to_trust_half_inning(game_info)
+                
         
         return game_info
 
@@ -1015,6 +1031,133 @@ class Game:
         )
                
         return game_events
+   
+    def _is_out_at_first(self, half_inning_df, seq, empty_cell_index, allowable_throw_angle = 7, allowable_first_base_dist=15):
+        """
+        an alt way to compute outs
+
+
+        """
+        # Assuming we have consecutive indices in half_inning_df!
+
+        # define some lists for convenience
+        all_batting_team = ["batter", "first_baserunner", "second_baserunner", "third_baserunner"]
+        all_br = ["first_baserunner", "second_baserunner", "third_baserunner"]
+
+        seq_len = seq.shape[0]
+
+        old_set_batting_team = set()
+        
+        if empty_cell_index != 0:
+            # you need to set and check all of the things that look at the prev row 
+            old_set_batting_team = set(half_inning_df.iloc[empty_cell_index - 1][all_batting_team])
+            #prev_total_outs = sum(seq[empty_cell_index - 1, :])
+
+        # importantly, the data here are ints or sets of ints
+        next_batter = None
+        next_set_batting_team = set()
+        next_set_br = set()
+        next_second_br = None
+        next_third_br = None
+
+        # the play_per_game of HRs within this game
+        hr_play_per_games = self.get_play_id_and_ppg_for_event("home run")["play_per_game"].values
+
+
+         # if there is a next play to pick from
+        if empty_cell_index < seq_len - 1:
+            next_batter = half_inning_df.iloc[empty_cell_index + 1]["batter"]
+            next_set_batting_team = set(half_inning_df.iloc[empty_cell_index + 1][all_batting_team])
+            next_set_br = set(half_inning_df.iloc[empty_cell_index + 1][all_br])
+
+            next_second_br = half_inning_df.iloc[empty_cell_index + 1]["second_baserunner"]
+            next_third_br = half_inning_df.iloc[empty_cell_index + 1]["third_baserunner"]
+
+        # again, the data here are ints or sets of ints
+        this_batter = half_inning_df.iloc[empty_cell_index]["batter"]
+        this_set_br = set(half_inning_df.iloc[empty_cell_index][all_br])
+        this_first_br = half_inning_df.iloc[empty_cell_index]["first_baserunner"]
+        this_second_br = half_inning_df.iloc[empty_cell_index]["second_baserunner"]
+        this_third_br = half_inning_df.iloc[empty_cell_index]["third_baserunner"]
+        this_set_batting_team = set(half_inning_df.iloc[empty_cell_index][all_batting_team])
+
+        # do we have the same batter on the next play
+        same_batter_next_play = this_batter == next_batter
+
+        # how many outs we would have if we assigned this_play_outs to this index
+        # does_this_make_3 = prev_total_outs + this_play_outs
+        this_play_per_game = half_inning_df.iloc[empty_cell_index]["play_per_game"]
+
+
+        this_play_events = self.game_events_df.loc[
+            (self.game_events_df["play_per_game"] == this_play_per_game),
+            :
+        ]
+        # to make a useful spot for breakpoints
+        pass 
+
+
+        if same_batter_next_play:
+            return 0
+
+        if this_play_per_game in hr_play_per_games:
+            return 0
+
+
+        ## compute the distance the ball is away from first when acquire
+        any_acqs_near_first = any(this_play_events.loc[
+            (this_play_events["event"] == "ball acquired") &
+            (this_play_events["player_position"] == 3),
+            ["ball_position_x", "ball_position_y"]
+        ].apply(lambda row: np.sqrt((row["ball_position_x"] - FIRST_BASE_COORDS[0])**2 +
+                                    (row["ball_position_y"] - FIRST_BASE_COORDS[1])**2)
+                                    , axis=1) < allowable_first_base_dist
+        )    
+
+
+        # maybe need something for player position and event at the same time?
+        if ("ball hit into play" in this_play_events["event"].values) and\
+            ("ball bounce" in this_play_events["event"].values) and\
+            ("throw (ball-in-play)" in this_play_events["event"].values) and\
+            ("ball acquired" in this_play_events["event"].values) and\
+            any(this_play_events["xy_throw_angle"] < allowable_throw_angle) and\
+            any_acqs_near_first and\
+            (this_batter not in next_set_batting_team):
+
+            return 1
+
+
+        # not outs at first, throws towards first
+        if ("ball hit into play" in this_play_events["event"].values) and\
+            ("ball bounce" in this_play_events["event"].values) and\
+            ("throw (ball-in-play)" in this_play_events["event"].values) and\
+            ("ball acquired" in this_play_events["event"].values) and\
+            any(this_play_events["xy_throw_angle"] < allowable_throw_angle) and\
+            any_acqs_near_first and\
+            (this_batter in next_set_batting_team):
+
+            return -1
+
+
+        return 0
+    
+    def _fill_outs_at_first(self, game_info):
+        """
+        
+        """
+        
+        game_info = game_info.copy()
+        
+        game_info["is_out_at_first"] = np.nan
+        
+        running_outs_seq = np.full((game_info.shape[0], 1), -99)
+
+        for ii in range(game_info.shape[0]):
+            running_outs_seq[ii] = self._is_out_at_first(game_info, game_info["is_out_at_first"], ii)
+
+        game_info["is_out_at_first"] = running_outs_seq
+        
+        return game_info
     
         
     def _find_empty_cell(self, seq):
