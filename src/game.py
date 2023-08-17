@@ -690,6 +690,7 @@ class Game:
         game_events["xy_throw_angle"] = np.nan
         game_events["elevation_throw_angle"] = np.nan
         game_events["throw_velo"] = np.nan
+        game_events["throw_bounced"] = 0
 
 
         # fill in xy
@@ -730,6 +731,17 @@ class Game:
                 , axis = 1
                )
 
+        # fill in whether the throw bounced
+        game_events.loc[
+            game_events["event"] == "throw (ball-in-play)",
+            "throw_bounced"
+        ] = game_events.loc[
+            (game_events["event"] == "throw (ball-in-play)"),
+            :
+        ].apply(lambda row: \
+               1 if row["next_event"] == "ball bounce" else 0
+               , axis = 1
+               )
         
         
         return game_events
