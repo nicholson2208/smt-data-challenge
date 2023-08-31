@@ -7,25 +7,42 @@ In an era where the game is increasingly quantified, the receiving aspect of fir
 
 ## An Overview of this Repo
 
-### Foundational
+### Foundational Files
 The files that power all analysis are:
 - `src/game.py`, contains a class for a Game. Game does all of the preprocessing and imputation 
 - `src/plotting.py`, contains a class for a Baseball_Field. This does all of the plotting and gif making.
 - `src/utils.py`, contains a assorted functions used in both classes and throughout the analysis.
 
-### Analysis
+### Analysis Files
+
+#### Final
+- [Final Analysis Pipeline](AnalysisPipeline.ipynb)
+    - Contains figures included in the final paper
+
+#### Explorations
+
+- [Game Info and Player Pos Disagreements](GameInfo_PlayerPos_Disagreement.ipynb)
+    - A look into how wide player pos and game info disagreements are
+
+- [Timestamp Alignment](PlotDebugging.ipynb)
+    - An attempt to realign plot timestamps
+ 
+- [Retagging Outs Manually](Retagging.ipynb)
+    - An attempt to manually identify why outs get mislabeled
 
 
-- outputs
+#### Outputs
+- [CSV outputs of this analysis](full_computed_dataset.csv)
+- [Produced Gifs of Plays](image_outputs/)
 
 ### Media From Paper
 
 #### Aligning Ball and Player Data
 
-a. ![A misalighed play](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/dp_misaligned_ts.mp4)
+a. ![A misaligned play](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/dp_misaligned_ts.mp4)
 - A misaligned play (Play ID 124, from Game 1903_01_TeamNE_TeamA2), notice the second basemen is not near the ball or bag when the turn is made. 
 
-b. ![A realighed play](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/dp_realigned_ts.mp4)
+b. ![A realigned play](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/dp_realigned_ts.mp4)
 - The same play with the ball and player timestamps aligned as described in the section 3.1 of the paper
 
 #### Example Scenarios
