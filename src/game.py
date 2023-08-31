@@ -622,11 +622,16 @@ class Game:
         game_events["next_event_code"] =  game_events.groupby("play_per_game")["event_code"].shift(-1)
         game_events["next_event"] =  game_events.groupby("play_per_game")["event"].shift(-1)
         game_events["next_event_ts"] =  game_events.groupby("play_per_game")["timestamp"].shift(-1)
+        game_events["next_player_position"] =  game_events.groupby("play_per_game")["player_position"].shift(-1)
+
         
         
         game_events["prev_event_code"] =  game_events.groupby("play_per_game")["event_code"].shift(1)
         game_events["prev_event"] =  game_events.groupby("play_per_game")["event"].shift(1)
         game_events["prev_event_ts"] =  game_events.groupby("play_per_game")["timestamp"].shift(1)
+        game_events["prev_player_position"] =  game_events.groupby("play_per_game")["player_position"].shift(1)
+
+    
     
     
         return game_events
