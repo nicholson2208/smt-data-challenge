@@ -11,7 +11,7 @@ In an era where the game is increasingly quantified, the receiving aspect of fir
 The files that power all analysis are:
 - `src/game.py`, contains a class for a Game. Game does all of the preprocessing and imputation 
 - `src/plotting.py`, contains a class for a Baseball_Field. This does all of the plotting and gif making.
-- `src/utils.py`, contains a assorted functions used in both classes and throughout the analysis.
+- `src/utils.py`, contains assorted functions used in both classes and throughout the analysis.
 
 ### Analysis Files
 
