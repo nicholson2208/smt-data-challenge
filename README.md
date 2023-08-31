@@ -22,10 +22,33 @@ The files that power all analysis are:
 
 #### Aligning Ball and Player Data
 
-![A misalighed play](media_for_paper/dp_misaligned_ts.mp4)
+a. ![A misalighed play](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/dp_misaligned_ts.mp4)
+- A misaligned play (Play ID 124, from Game 1903_01_TeamNE_TeamA2), notice the second basemen is not near the ball or bag when the turn is made. 
 
-[![A realighed play](media_for_paper/dp_realigned_ts.mp4)](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/dp_misaligned_ts.mp4)
+b. ![A realighed play](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/dp_realigned_ts.mp4)
+- The same play with the ball and player timestamps aligned as described in the section 3.1 of the paper
 
-The above show a misaligned play (Play ID 124, from Game 1903_01_TeamNE_TeamA2), notice the second basemen is not near the ball or bag when the turn is made. The second video shows the same play with the ball and player timestamps aligned as described in the section 3.1 of the paper
+#### Example Scenarios
+
+a. ![A likely out that was converted for an out](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/should_have_been_and_was.mp4)
+- A likely out that was converted for out. These plays are considered routine. (Play ID 150, from Game 1902_26_TeamMH_TeamA3) 
+
+b. ![A unlikely out that was not converted for an out](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/no_shot_at_out.mp4)
+- An unlikely out that was not converted for an out. These plays are long shots. (Play ID 132, from Game 1903_32_TeamNB_TeamA1) 
+
+c. ![A unlikely out that was converted for an out](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/good_scoop_good_play.mp4)
+- An unlikely out that was converted for an out. This is a great play by the first baseman. (Play ID 106, from Game 1903_30_TeamNF_TeamA2) 
+
+d. ![A likely out that was not converted for an out](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/should_have_been_out_bad_play.mp4)
+- A likely out that was not converted. (Play ID 193, from Game 1903_05_TeamND_TeamA2) These plays are hard to interpret without additional context. It could be a blunder on the first basemen, or a throw bad enough that preventing the throw from getting away is more important than the out.
+
+
+#### Preventing a bad play from getting worse
+
+a. ![](https://github.com/nicholson2208/smt-data-challenge/blob/main/media_for_paper/AlonsoSnagSavesError.png)
+- [Mets first baseman Pete Alonso saves an error on a throw well off the bag](https://www.mlb.com/video/joey-lucchesi-in-play-no-out-to-masyn-winn)
+
+b. ![A bad throw pulls a player off the bag](https://raw.githubusercontent.com/nicholson2208/smt-data-challenge/main/media_for_paper/sample.mp4)
+- A similarly bad throw pulls the first baseman off the bag in Play ID 25 of Game 1902_05_TeamML_TeamB. While there is value in stopping a bad play from getting worse, the data anonymization hampered my ability to explore that in this analysis.
 
 
